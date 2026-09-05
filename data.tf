@@ -33,8 +33,13 @@ resource "azurerm_postgresql_flexible_server" "pg" {
   tags = local.tags
 
   lifecycle {
-    # Rotating the admin password is an operational task, not a plan diff.
-    ignore_changes = [administrator_password, zone, high_availability[0].standby_availability_zone]
+    # Rotating the admin password is an operational task, not a plan diff, and
+    # Azure picks the availability zone itself.
+    #
+    # Deliberately not ignoring high_availability[0].standby_availability_zone:
+    # the block is absent whenever postgres_ha_enabled is false, and indexing
+    # into a block that does not exist is a plan-time error.
+    ignore_changes = [administrator_password, zone]
   }
 
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]

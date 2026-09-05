@@ -150,7 +150,7 @@ module "hub" {
 
   env = {
     ASPNETCORE_ENVIRONMENT               = local.dotnet_env
-    ASPNETCORE_HTTP_PORTS               = tostring(local.ports.dotnet)
+    ASPNETCORE_HTTP_PORTS                = tostring(local.ports.dotnet)
     Connectors__SimulateWhenUnconfigured = local.is_production ? "false" : "true"
     Connectors__DispatchIntervalSeconds  = "15"
   }
