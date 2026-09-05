@@ -1,0 +1,19 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan-*
+crash.log
+crash.*.log
+
+# Never commit variable files carrying real values - envs/*.tfvars are sizing
+# only, and secrets live in Key Vault.
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+.DS_Store

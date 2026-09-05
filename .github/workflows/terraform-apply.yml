@@ -1,0 +1,55 @@
+name: terraform apply
+
+# Called by terraform.yml, once per environment. Split out so the approval
+# gate is a GitHub environment rather than a conditional inside a matrix.
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    env:
+      ARM_USE_OIDC: true
+      ARM_USE_AZUREAD: true
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_use_oidc: true
+      TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Init
+        run: terraform init -backend-config=envs/backend-${{ inputs.environment }}.hcl
+
+      # Re-planned rather than replaying the plan artifact: an approval may
+      # have been sitting for hours, and applying a stale plan is how an
+      # environment ends up in a state nobody reviewed.
+      - name: Apply
+        run: terraform apply -auto-approve -var-file=envs/${{ inputs.environment }}.tfvars
+
+      - name: Outputs
+        run: |
+          {
+            echo "### ${{ inputs.environment }}"
+            echo '```'
+            terraform output -json \
+              | jq -r 'to_entries[] | select(.value.sensitive | not) | "\(.key) = \(.value.value)"'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
