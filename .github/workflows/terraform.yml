@@ -23,7 +23,7 @@ permissions:
   pull-requests: write   # plan summary comment
 
 env:
-  TF_VERSION: 1.9.8
+  TF_VERSION: 1.15.8
   ARM_USE_OIDC: true
   ARM_USE_AZUREAD: true
   ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
@@ -69,6 +69,23 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
+
+      # Without this the provider fails with "a Tenant ID must be configured
+      # when authenticating with OIDC", which says nothing about the cause.
+      - name: Check pipeline identity is configured
+        run: |
+          missing=""
+          if [ -z "${{ vars.AZURE_CLIENT_ID }}" ]; then missing="$missing AZURE_CLIENT_ID"; fi
+          if [ -z "${{ vars.AZURE_TENANT_ID }}" ]; then missing="$missing AZURE_TENANT_ID"; fi
+          if [ -z "${{ vars.AZURE_SUBSCRIPTION_ID }}" ]; then missing="$missing AZURE_SUBSCRIPTION_ID"; fi
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository variables:$missing"
+            echo "This repository has no Azure identity yet. Run:"
+            echo "  ./bootstrap/bootstrap.sh <subscription-id> <org>/<repo>"
+            echo "then add the three variables it prints under"
+            echo "Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
 
       - name: Init
         run: terraform init -backend-config=envs/backend-${{ matrix.environment }}.hcl
@@ -125,30 +142,24 @@ jobs:
           path: tfplan-${{ matrix.environment }}
           retention-days: 5
 
-  # development -> dev. main -> staging, then prod. Each behind its own
-  # GitHub environment, which is where the approval gate lives.
+  # dev applies automatically from the development branch. Staging and
+  # production do NOT apply on a merge - they are deliberately manual.
+  #
+  # The original design put the approval gate on the GitHub environment, but
+  # required reviewers need Pro/Team/Enterprise on a private repository and
+  # this one is on Free. Without that rule an environment is only a label, and
+  # a merge to main would build the production stack - zone-redundant
+  # Postgres, GZRS storage, always-warm replicas - with nobody in the loop.
+  #
+  # So the gate is the workflow_dispatch itself: someone chooses the
+  # environment and presses the button. Move these back to `push` once the
+  # plan supports required reviewers.
   apply-dev:
     needs: plan
     if: github.ref == 'refs/heads/development' && github.event_name == 'push'
     uses: ./.github/workflows/terraform-apply.yml
     with:
       environment: dev
-    secrets: inherit
-
-  apply-staging:
-    needs: plan
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    uses: ./.github/workflows/terraform-apply.yml
-    with:
-      environment: staging
-    secrets: inherit
-
-  apply-prod:
-    needs: apply-staging
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    uses: ./.github/workflows/terraform-apply.yml
-    with:
-      environment: prod
     secrets: inherit
 
   apply-manual:
