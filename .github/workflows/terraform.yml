@@ -1,8 +1,11 @@
 name: infrastructure
 
-# Plan on every pull request, apply on merge. Environments carry the approval
-# gates, so a production change is reviewed twice: once as code, once at the
-# point it is applied.
+# The environment is chosen from the Run workflow dropdown and defaults to dev
+# on a pull request or a push, where there is nobody to ask. Everything - the
+# Azure identity, the state file, the sizing - follows that one choice.
+#
+# Only dev is set up today. Picking staging or prod fails on the identity
+# check, by design: it is a missing environment secret, not a broken pipeline.
 
 on:
   pull_request:
@@ -12,8 +15,9 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: Environment to apply
+        description: Environment
         required: true
+        default: dev
         type: choice
         options: [dev, staging, prod]
 
@@ -23,14 +27,14 @@ permissions:
   pull-requests: write   # plan summary comment
 
 env:
-  TF_VERSION: 1.9.8
+  TF_VERSION: 1.15.8
   ARM_USE_OIDC: true
   ARM_USE_AZUREAD: true
-  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   TF_VAR_use_oidc: true
-  TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
 jobs:
   validate:
@@ -59,10 +63,18 @@ jobs:
   plan:
     needs: validate
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        environment: [dev, staging, prod]
+    # The Azure identity is held as environment secrets, so each environment
+    # can carry its own subscription and app registration. A job only sees an
+    # environment's secrets if it declares one - hence this on a job that
+    # otherwise has no reason to name an environment.
+    #
+    # `inputs.environment` is empty for pull_request and push, which have no
+    # dropdown to read, so those default to dev.
+    #
+    # One consequence: an approval rule on an environment gates its plans as
+    # well as its applies. Dev is ungated so it does not arise; a higher
+    # environment that wants review on applies needs a plan-only environment.
+    environment: ${{ inputs.environment || 'dev' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -70,15 +82,40 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
+      # Without this the provider fails with "a Tenant ID must be configured
+      # when authenticating with OIDC", which says nothing about the cause.
+      #
+      # Read from the environment rather than interpolating: these are secrets
+      # now, and an interpolated secret ends up on a command line.
+      - name: Check pipeline identity is configured
+        run: |
+          missing=""
+          if [ -z "$ARM_CLIENT_ID" ]; then missing="$missing AZURE_CLIENT_ID"; fi
+          if [ -z "$ARM_TENANT_ID" ]; then missing="$missing AZURE_TENANT_ID"; fi
+          if [ -z "$ARM_SUBSCRIPTION_ID" ]; then missing="$missing AZURE_SUBSCRIPTION_ID"; fi
+          if [ -n "$missing" ]; then
+            ENV_NAME="${{ inputs.environment || 'dev' }}"
+            echo "::error::Environment '$ENV_NAME' is missing:$missing"
+            echo "Environment secrets live per environment, so this says the"
+            echo "'$ENV_NAME' environment has no Azure identity - not that the"
+            echo "pipeline is broken. Only dev is set up today."
+            echo
+            echo "To set one up:"
+            echo "  ./bootstrap/bootstrap.sh <subscription-id> <org>/<repo>"
+            echo "then Settings > Environments > $ENV_NAME > Environment secrets,"
+            echo "and add the three values it prints."
+            exit 1
+          fi
+
       - name: Init
-        run: terraform init -backend-config=envs/backend-${{ matrix.environment }}.hcl
+        run: terraform init -backend-config=envs/backend-${{ inputs.environment || 'dev' }}.hcl
 
       - name: Plan
         id: plan
         run: |
           terraform plan \
-            -var-file=envs/${{ matrix.environment }}.tfvars \
-            -out=tfplan-${{ matrix.environment }} \
+            -var-file=envs/${{ inputs.environment || 'dev' }}.tfvars \
+            -out=tfplan-${{ inputs.environment || 'dev' }} \
             -detailed-exitcode -no-color | tee plan.txt
         continue-on-error: true
 
@@ -101,7 +138,7 @@ jobs:
             const plan = fs.readFileSync('plan.txt', 'utf8');
             const summary = plan.match(/^Plan: .*$/m)?.[0] ?? 'No changes.';
             const body = [
-              `### Terraform plan — \`${{ matrix.environment }}\``,
+              `### Terraform plan \u2014 \`${{ inputs.environment || 'dev' }}\``,
               '',
               `**${summary}**`,
               '',
@@ -121,34 +158,23 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tfplan-${{ matrix.environment }}
-          path: tfplan-${{ matrix.environment }}
+          name: tfplan-${{ inputs.environment || 'dev' }}
+          path: tfplan-${{ inputs.environment || 'dev' }}
           retention-days: 5
 
-  # development -> dev. main -> staging, then prod. Each behind its own
-  # GitHub environment, which is where the approval gate lives.
+  # A push to development applies dev. There is no dropdown on a push, so this
+  # one path names its environment. Everything else follows the selection.
+  # There is no approval gate:
+  # required reviewers need Pro/Team/Enterprise on a private repository and
+  # this one is on Free, so a GitHub environment is only a label here. That is
+  # tolerable for dev and would not be for production - which is one more
+  # reason staging and prod are not wired in yet.
   apply-dev:
     needs: plan
     if: github.ref == 'refs/heads/development' && github.event_name == 'push'
     uses: ./.github/workflows/terraform-apply.yml
     with:
       environment: dev
-    secrets: inherit
-
-  apply-staging:
-    needs: plan
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    uses: ./.github/workflows/terraform-apply.yml
-    with:
-      environment: staging
-    secrets: inherit
-
-  apply-prod:
-    needs: apply-staging
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    uses: ./.github/workflows/terraform-apply.yml
-    with:
-      environment: prod
     secrets: inherit
 
   apply-manual:

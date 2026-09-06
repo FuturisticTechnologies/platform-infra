@@ -1,12 +1,13 @@
 # platform-infra
 
 Terraform for the PayrollFuturistic platform on Azure Container Apps. One root
-module, three environments, no click-ops.
+module, no click-ops.
 
-> **Not yet applied anywhere.** Terraform and the Azure CLI are not installed on
-> the machine this was written on, so it has never been through `terraform
-> validate` or `plan`. The pipeline's `validate` job is the first real check —
-> expect to fix a provider-schema detail or two on the first run.
+> **Dev only, and not applied yet.** `terraform validate` passes against
+> azurerm 4.81, and `terraform plan` against the FT-DEV subscription reports
+> **50 to add, 0 to change, 0 to destroy** — so the graph is real, but nothing
+> has been created. Staging and production configs exist under `envs/` and are
+> not wired into the pipeline.
 
 ## What it builds
 
@@ -105,15 +106,85 @@ comparable — it does not need HA, it needs to behave like production.
 
 ## Pipeline
 
-`terraform.yml` runs fmt, validate and tflint, then plans all three
-environments and comments each plan on the pull request. On merge:
-`development` → dev; `main` → staging → prod, each behind a GitHub environment
-approval. Apply re-plans rather than replaying the artifact, because an
-approval may have been sitting for hours.
+`terraform.yml` runs fmt, validate and tflint, then plans and comments the plan
+on the pull request. Applying is either a push to `development`, or the manual
+**Run workflow** button. Apply re-plans rather than replaying the artifact,
+because a run may have been sitting for hours.
+
+**The environment is a dropdown**, not a hardcoded value. One choice drives the
+Azure identity, the state file, the tfvars and the sizing:
+
+```
+Run workflow ▸ Environment: [ dev ▾ ]   → envs/backend-dev.hcl
+                             staging       envs/dev.tfvars
+                             prod          dev environment secrets
+```
+
+`pull_request` and `push` have no dropdown to read, so they default to `dev`.
+Only dev is configured today: choosing staging or prod fails the identity
+check, which reports the missing environment secrets by name rather than
+failing somewhere less obvious.
+
+There is no approval gate, and that is not an oversight: required reviewers on
+an environment need Pro/Team/Enterprise on a private repository, and this one
+is on Free — the API refuses to create the protection rule, so a GitHub
+environment here is only a label. The gate is the manual dispatch itself. It is
+an acceptable answer for dev and would not be for production, which is one
+reason staging and prod are not wired in.
 
 Authentication is a federated credential — OIDC, no client secret exists to
-rotate or leak. `bootstrap.sh` creates it and prints the three repository
-variables to set.
+rotate or leak. `bootstrap.sh` creates it and prints three values, held as
+**environment** secrets on `dev`:
+
+| Secret | Scope |
+|---|---|
+| `AZURE_CLIENT_ID` | environment `dev` |
+| `AZURE_TENANT_ID` | environment `dev` |
+| `AZURE_SUBSCRIPTION_ID` | environment `dev` |
+
+Environment-scoped rather than repository-scoped so staging and production can
+carry their own subscription and app registration without any workflow change —
+add the environment, add its three secrets, point a job at it.
+
+Two consequences of that choice. A job only sees an environment's secrets if it
+declares `environment:`, which is why the `plan` job names `dev` despite having
+no other reason to. And an approval rule on an environment would gate its plans
+as well as its applies, so a higher environment that needs both wants a separate
+plan-only environment.
+
+The values are identifiers rather than credentials, but as secrets they are
+masked in logs — which makes an OIDC subject mismatch harder to read when one
+happens. `az ad app federated-credential list --id <app>` shows the other side
+of that comparison.
+
+## Nightly shutdown
+
+`shutdown.yml` stops what can be stopped at **17:00 London**, Monday to Friday,
+and `Run workflow ▸ start` puts it back. Nothing it does touches data or
+Terraform state.
+
+| Resource | Overnight |
+|---|---|
+| PostgreSQL Flexible Server | **stopped** — compute charge ends, storage still billed |
+| Integration hub replica | **scaled to 0** |
+| Payroll API, RTI service | already scale to zero when idle |
+| Redis, NAT Gateway, public IP, ACR, Log Analytics | **still billing** |
+
+That last row is the honest part: those bill by the hour whether or not
+anything uses them, and Azure has no way to stop them — only to delete them.
+If the idle cost still looks wrong after this, deleting them nightly is the
+next step, and it is a bigger decision than a scheduled job should take on its
+own: the NAT Gateway's public IP is the address HMRC would allowlist, and it
+changes when it is recreated.
+
+GitHub cron is UTC and does not observe daylight saving, so the workflow
+carries two entries — 16:00 and 17:00 UTC — and a guard step drops whichever
+one is not 17:00 in London today. One fires, one exits immediately.
+
+Two things to know. Scheduled workflows only run from the **default branch**,
+so this does nothing until it is merged. And Terraform still owns the replica
+counts: the next `terraform apply` after a shutdown will set the hub back to
+one replica, which is drift by design rather than a bug.
 
 ## Known gaps
 

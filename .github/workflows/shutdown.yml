@@ -1,0 +1,150 @@
+name: shutdown
+
+# Stops the parts of an environment that can be stopped, on a weekday evening.
+#
+# Cost, honestly: this saves the Postgres compute charge and the integration
+# hub's always-on replica. It does not save Redis, the NAT Gateway, the public
+# IP, the container registry or Log Analytics retention - those bill by the
+# hour whether anything uses them and can only be deleted, not stopped. If the
+# idle cost still looks wrong after this, deleting those is the next step, and
+# it is a bigger decision than a nightly job should make on its own.
+#
+# Nothing here touches data or Terraform state. `start` puts it back, and so
+# does a normal `terraform apply`.
+
+on:
+  schedule:
+    # GitHub cron is UTC and does not observe daylight saving, so 17:00 in
+    # London needs both entries. The guard below drops whichever one is an
+    # hour out today, so exactly one of them does the work.
+    - cron: "0 16 * * 1-5"   # 17:00 London while BST is in force
+    - cron: "0 17 * * 1-5"   # 17:00 London while GMT is in force
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment
+        required: true
+        default: dev
+        type: choice
+        options: [dev, staging, prod]
+      action:
+        description: stop or start
+        required: true
+        default: stop
+        type: choice
+        options: [stop, start]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  shutdown:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'dev' }}
+
+    env:
+      ENVIRONMENT: ${{ inputs.environment || 'dev' }}
+      ACTION: ${{ inputs.action || 'stop' }}
+      PREFIX: ftpay
+      # The containerapp commands live in an extension. Install it without
+      # asking, since there is nobody at the keyboard.
+      AZURE_EXTENSION_USE_DYNAMIC_INSTALL: yes_without_prompt
+
+    steps:
+      # Both cron entries fire every weekday; only one of them is 17:00 in
+      # London. Checking the actual local hour is simpler than reasoning about
+      # when the clocks change.
+      - name: Is it 17:00 in London?
+        if: github.event_name == 'schedule'
+        run: |
+          HOUR=$(TZ=Europe/London date +%H)
+          if [ "$HOUR" != "17" ]; then
+            echo "London time is ${HOUR}:00, not 17:00 - the other schedule covers today."
+            echo "SKIP=true" >> "$GITHUB_ENV"
+          else
+            echo "London time is 17:00. Proceeding."
+          fi
+
+      - name: Sign in to Azure
+        if: env.SKIP != 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Stop or start the environment
+        if: env.SKIP != 'true'
+        run: |
+          set -euo pipefail
+          RG="rg-${PREFIX}-${ENVIRONMENT}"
+
+          if ! az group show -n "$RG" -o none 2>/dev/null; then
+            echo "::notice::Resource group $RG does not exist - nothing to $ACTION."
+            exit 0
+          fi
+
+          # Names are read from the resource group rather than assumed, so a
+          # rename in Terraform does not silently turn this into a no-op.
+          SERVERS=$(az postgres flexible-server list -g "$RG" --query "[].name" -o tsv)
+          APPS=$(az containerapp list -g "$RG" --query "[].name" -o tsv)
+
+          echo "Resource group : $RG"
+          echo "Postgres       : ${SERVERS:-none}"
+          echo "Container apps : ${APPS:-none}"
+          echo
+
+          if [ "$ACTION" = "stop" ]; then
+            for S in $SERVERS; do
+              STATE=$(az postgres flexible-server show -g "$RG" -n "$S" --query state -o tsv)
+              if [ "$STATE" = "Ready" ]; then
+                echo "stopping  $S"
+                az postgres flexible-server stop -g "$RG" -n "$S" --output none
+              else
+                echo "skipping  $S (state: $STATE)"
+              fi
+            done
+
+            # Only the hub actually holds a replica open; the others are
+            # already at zero. Setting them all is idempotent and means this
+            # keeps working if a future app is left warm.
+            for A in $APPS; do
+              echo "scaling   $A to 0 replicas"
+              az containerapp update -g "$RG" -n "$A" --min-replicas 0 --output none
+            done
+          else
+            for S in $SERVERS; do
+              STATE=$(az postgres flexible-server show -g "$RG" -n "$S" --query state -o tsv)
+              if [ "$STATE" = "Stopped" ]; then
+                echo "starting  $S"
+                az postgres flexible-server start -g "$RG" -n "$S" --output none
+              else
+                echo "skipping  $S (state: $STATE)"
+              fi
+            done
+
+            # Terraform owns the real replica counts. Restoring the hub here
+            # covers the common case; a `terraform apply` restores everything
+            # to whatever the configuration says.
+            for A in $APPS; do
+              case "$A" in
+                *integration-hub)
+                  echo "scaling   $A back to 1 replica"
+                  az containerapp update -g "$RG" -n "$A" --min-replicas 1 --output none
+                  ;;
+              esac
+            done
+          fi
+
+      - name: Summary
+        if: env.SKIP != 'true'
+        run: |
+          {
+            echo "### ${ACTION} — ${ENVIRONMENT}"
+            echo
+            echo "Postgres compute and the always-on container replica are"
+            echo "${ACTION}ped. Redis, the NAT gateway, the public IP, the"
+            echo "container registry and Log Analytics continue to bill:"
+            echo "they cannot be stopped, only deleted."
+          } >> "$GITHUB_STEP_SUMMARY"
