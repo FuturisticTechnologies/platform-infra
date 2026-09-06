@@ -119,11 +119,29 @@ an acceptable answer for dev and would not be for production, which is one
 reason staging and prod are not wired in.
 
 Authentication is a federated credential — OIDC, no client secret exists to
-rotate or leak. `bootstrap.sh` creates it and prints the three values, which are
-held as repository **secrets** (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
-`AZURE_SUBSCRIPTION_ID`). They are identifiers rather than credentials, so the
-only cost is that they are masked in logs — which makes an OIDC subject
-mismatch harder to read when one happens.
+rotate or leak. `bootstrap.sh` creates it and prints three values, held as
+**environment** secrets on `dev`:
+
+| Secret | Scope |
+|---|---|
+| `AZURE_CLIENT_ID` | environment `dev` |
+| `AZURE_TENANT_ID` | environment `dev` |
+| `AZURE_SUBSCRIPTION_ID` | environment `dev` |
+
+Environment-scoped rather than repository-scoped so staging and production can
+carry their own subscription and app registration without any workflow change —
+add the environment, add its three secrets, point a job at it.
+
+Two consequences of that choice. A job only sees an environment's secrets if it
+declares `environment:`, which is why the `plan` job names `dev` despite having
+no other reason to. And an approval rule on an environment would gate its plans
+as well as its applies, so a higher environment that needs both wants a separate
+plan-only environment.
+
+The values are identifiers rather than credentials, but as secrets they are
+masked in logs — which makes an OIDC subject mismatch harder to read when one
+happens. `az ad app federated-credential list --id <app>` shows the other side
+of that comparison.
 
 ## Known gaps
 

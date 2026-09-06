@@ -60,6 +60,16 @@ jobs:
   plan:
     needs: validate
     runs-on: ubuntu-latest
+    # The Azure identity is held as environment secrets, not repository ones,
+    # so each environment can carry its own subscription and app registration
+    # when staging and production arrive. A job only sees an environment's
+    # secrets if it declares the environment - hence this line on a job that
+    # otherwise has no reason to name one.
+    #
+    # It also means an approval rule on `dev` would gate plans as well as
+    # applies. Leave dev ungated; give higher environments their own
+    # plan-only environment if that becomes a problem.
+    environment: dev
     steps:
       - uses: actions/checkout@v4
 
