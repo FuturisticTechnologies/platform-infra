@@ -106,10 +106,24 @@ comparable — it does not need HA, it needs to behave like production.
 
 ## Pipeline
 
-`terraform.yml` runs fmt, validate and tflint, then plans **dev** and comments
-the plan on the pull request. Applying is either a push to `development`, or
-the manual **Run workflow** button. Apply re-plans rather than replaying the
-artifact, because a run may have been sitting for hours.
+`terraform.yml` runs fmt, validate and tflint, then plans and comments the plan
+on the pull request. Applying is either a push to `development`, or the manual
+**Run workflow** button. Apply re-plans rather than replaying the artifact,
+because a run may have been sitting for hours.
+
+**The environment is a dropdown**, not a hardcoded value. One choice drives the
+Azure identity, the state file, the tfvars and the sizing:
+
+```
+Run workflow ▸ Environment: [ dev ▾ ]   → envs/backend-dev.hcl
+                             staging       envs/dev.tfvars
+                             prod          dev environment secrets
+```
+
+`pull_request` and `push` have no dropdown to read, so they default to `dev`.
+Only dev is configured today: choosing staging or prod fails the identity
+check, which reports the missing environment secrets by name rather than
+failing somewhere less obvious.
 
 There is no approval gate, and that is not an oversight: required reviewers on
 an environment need Pro/Team/Enterprise on a private repository, and this one
