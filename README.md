@@ -1,12 +1,13 @@
 # platform-infra
 
 Terraform for the PayrollFuturistic platform on Azure Container Apps. One root
-module, three environments, no click-ops.
+module, no click-ops.
 
-> **Not yet applied anywhere.** Terraform and the Azure CLI are not installed on
-> the machine this was written on, so it has never been through `terraform
-> validate` or `plan`. The pipeline's `validate` job is the first real check —
-> expect to fix a provider-schema detail or two on the first run.
+> **Dev only, and not applied yet.** `terraform validate` passes against
+> azurerm 4.81, and `terraform plan` against the FT-DEV subscription reports
+> **50 to add, 0 to change, 0 to destroy** — so the graph is real, but nothing
+> has been created. Staging and production configs exist under `envs/` and are
+> not wired into the pipeline.
 
 ## What it builds
 
@@ -105,15 +106,24 @@ comparable — it does not need HA, it needs to behave like production.
 
 ## Pipeline
 
-`terraform.yml` runs fmt, validate and tflint, then plans all three
-environments and comments each plan on the pull request. On merge:
-`development` → dev; `main` → staging → prod, each behind a GitHub environment
-approval. Apply re-plans rather than replaying the artifact, because an
-approval may have been sitting for hours.
+`terraform.yml` runs fmt, validate and tflint, then plans **dev** and comments
+the plan on the pull request. Applying is either a push to `development`, or
+the manual **Run workflow** button. Apply re-plans rather than replaying the
+artifact, because a run may have been sitting for hours.
+
+There is no approval gate, and that is not an oversight: required reviewers on
+an environment need Pro/Team/Enterprise on a private repository, and this one
+is on Free — the API refuses to create the protection rule, so a GitHub
+environment here is only a label. The gate is the manual dispatch itself. It is
+an acceptable answer for dev and would not be for production, which is one
+reason staging and prod are not wired in.
 
 Authentication is a federated credential — OIDC, no client secret exists to
-rotate or leak. `bootstrap.sh` creates it and prints the three repository
-variables to set.
+rotate or leak. `bootstrap.sh` creates it and prints the three values, which are
+held as repository **secrets** (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+`AZURE_SUBSCRIPTION_ID`). They are identifiers rather than credentials, so the
+only cost is that they are masked in logs — which makes an OIDC subject
+mismatch harder to read when one happens.
 
 ## Known gaps
 

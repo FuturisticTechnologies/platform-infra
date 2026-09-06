@@ -27,11 +27,11 @@ env:
   TF_VERSION: 1.15.8
   ARM_USE_OIDC: true
   ARM_USE_AZUREAD: true
-  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   TF_VAR_use_oidc: true
-  TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
 jobs:
   validate:
@@ -69,18 +69,21 @@ jobs:
 
       # Without this the provider fails with "a Tenant ID must be configured
       # when authenticating with OIDC", which says nothing about the cause.
+      #
+      # Read from the environment rather than interpolating: these are secrets
+      # now, and an interpolated secret ends up on a command line.
       - name: Check pipeline identity is configured
         run: |
           missing=""
-          if [ -z "${{ vars.AZURE_CLIENT_ID }}" ]; then missing="$missing AZURE_CLIENT_ID"; fi
-          if [ -z "${{ vars.AZURE_TENANT_ID }}" ]; then missing="$missing AZURE_TENANT_ID"; fi
-          if [ -z "${{ vars.AZURE_SUBSCRIPTION_ID }}" ]; then missing="$missing AZURE_SUBSCRIPTION_ID"; fi
+          if [ -z "$ARM_CLIENT_ID" ]; then missing="$missing AZURE_CLIENT_ID"; fi
+          if [ -z "$ARM_TENANT_ID" ]; then missing="$missing AZURE_TENANT_ID"; fi
+          if [ -z "$ARM_SUBSCRIPTION_ID" ]; then missing="$missing AZURE_SUBSCRIPTION_ID"; fi
           if [ -n "$missing" ]; then
-            echo "::error::Missing repository variables:$missing"
+            echo "::error::Missing repository secrets:$missing"
             echo "This repository has no Azure identity yet. Run:"
             echo "  ./bootstrap/bootstrap.sh <subscription-id> <org>/<repo>"
-            echo "then add the three variables it prints under"
-            echo "Settings > Secrets and variables > Actions > Variables."
+            echo "then add the three values it prints under"
+            echo "Settings > Secrets and variables > Actions > Secrets."
             exit 1
           fi
 
