@@ -132,3 +132,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "deploy_principal_object_id" {
+  description = "Object id of the service principal the application repositories deploy with. Granted AcrPush and Contributor on this environment's resource group - deliberately not the Owner rights the Terraform principal needs. Null leaves both role assignments out."
+  type        = string
+  default     = null
+}

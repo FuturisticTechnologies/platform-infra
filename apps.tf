@@ -61,9 +61,15 @@ module "backend" {
   secrets = local.kv_secrets
 
   env = {
-    APP_ENV                         = local.app_env
-    APP_DEBUG                       = "false"
-    APP_CORS_ORIGINS                = join(",", var.cors_origins)
+    APP_ENV   = local.app_env
+    APP_DEBUG = "false"
+    # The front end is served from Static Web Apps, so it is a different
+    # origin to the API and the browser will say so. Terraform knows the
+    # hostname, so nobody has to paste it in after the fact.
+    APP_CORS_ORIGINS = join(",", concat(
+      var.cors_origins,
+      ["https://${azurerm_static_web_app.frontend.default_host_name}"],
+    ))
     JWT_ALGORITHM                   = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES = "30"
   }
