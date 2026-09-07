@@ -42,6 +42,29 @@ resource "azurerm_role_assignment" "acr_pull" {
   principal_id         = azurerm_user_assigned_identity.app.principal_id
 }
 
+# --- Application deployment identity -------------------------------------
+# The application repositories deploy with their own principal, not the one
+# that runs Terraform. That one is subscription Owner because it creates role
+# assignments; a pipeline that only pushes an image and moves a revision has
+# no business holding it.
+#
+# Push images, and change things inside this environment's resource group.
+# Nothing outside it, and no ability to grant itself anything.
+
+resource "azurerm_role_assignment" "deploy_acr_push" {
+  count                = var.deploy_principal_object_id == null ? 0 : 1
+  scope                = azurerm_container_registry.acr.id
+  role_definition_name = "AcrPush"
+  principal_id         = var.deploy_principal_object_id
+}
+
+resource "azurerm_role_assignment" "deploy_rg_contributor" {
+  count                = var.deploy_principal_object_id == null ? 0 : 1
+  scope                = azurerm_resource_group.rg.id
+  role_definition_name = "Contributor"
+  principal_id         = var.deploy_principal_object_id
+}
+
 # --- Key Vault -----------------------------------------------------------
 
 resource "azurerm_key_vault" "kv" {

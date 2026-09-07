@@ -157,6 +157,45 @@ masked in logs — which makes an OIDC subject mismatch harder to read when one
 happens. `az ad app federated-credential list --id <app>` shows the other side
 of that comparison.
 
+## Deploying the applications
+
+Terraform builds the environment; the application repositories put code into
+it. Each has a `deploy.yml` that runs on a push to `main` and can be dispatched
+by hand.
+
+| Repository | Deploys | Into |
+|---|---|---|
+| `national-insurance` | API image, Alembic migration, Angular bundle | `ca-…-payroll-api`, `caj-…-migrate`, the Static Web App |
+| `hmrc-rti-service` | .NET image | `ca-…-hmrc-rti` |
+| `integration-hub` | .NET image | `ca-…-integration-hub` |
+
+The four snapshot repositories — `foundation-core`, `core-data-model`,
+`payroll-engine`, `paye-tax-engine` — deploy nowhere. They are cumulative
+milestone snapshots of the same codebase, and only the newest is live.
+
+Each deploy builds the image **in ACR** rather than on the runner, creates a
+revision, waits for it to report Running and Healthy, and only then shifts
+traffic to it. Because the apps run in Multiple revision mode, a revision that
+never becomes healthy never receives traffic: the failure mode is "nothing
+changed", not "the service is down". A manual run with `cutover=false` leaves
+the new revision at 0% to shift by hand.
+
+For the payroll API the migration runs **before** the revision takes traffic,
+because the code being deployed expects the schema it produces. The job has
+`replica_retry_limit = 0`, so a half-applied migration stops the deployment
+rather than being retried into a worse state.
+
+Nothing that Terraform owns is hardcoded in a deploy pipeline. The registry
+name carries a hash suffix only Terraform knows, so the pipelines read the
+registry, app and job names out of the resource group at deploy time — a
+rename in Terraform cannot turn a deployment into a no-op that reports success.
+
+**Identity.** The application repositories authenticate as `ftpay-app-deploy`,
+which holds AcrPush on the registry and Contributor on the environment's
+resource group — not the subscription Owner the Terraform principal needs.
+Its object id goes in `deploy_principal_object_id`; leave it null and both role
+assignments are simply omitted.
+
 ## Nightly shutdown
 
 `shutdown.yml` stops what can be stopped at **17:00 London**, Monday to Friday,

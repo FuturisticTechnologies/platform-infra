@@ -17,4 +17,5 @@ redis_capacity = 0
 hmrc_base_url              = "https://test-api.service.hmrc.gov.uk"
 hmrc_allow_live_submission = false
 
-cors_origins = ["http://localhost:4200"]
+cors_origins               = ["http://localhost:4200"]
+deploy_principal_object_id = "619fb10a-4a93-4795-a7d0-2ccdd76c7362"
