@@ -9,9 +9,9 @@ name: infrastructure
 
 on:
   pull_request:
-    branches: [main, development]
+    branches: [main, dev]
   push:
-    branches: [main, development]
+    branches: [main, dev]
   workflow_dispatch:
     inputs:
       environment:
@@ -162,8 +162,8 @@ jobs:
           path: tfplan-${{ inputs.environment || 'dev' }}
           retention-days: 5
 
-  # A push to development applies dev. There is no dropdown on a push, so this
-  # one path names its environment. Everything else follows the selection.
+  # A push to dev applies the dev environment. There is no dropdown on a push, so
+  # this one path names its environment. Everything else follows the selection.
   # There is no approval gate:
   # required reviewers need Pro/Team/Enterprise on a private repository and
   # this one is on Free, so a GitHub environment is only a label here. That is
@@ -171,7 +171,7 @@ jobs:
   # reason staging and prod are not wired in yet.
   apply-dev:
     needs: plan
-    if: github.ref == 'refs/heads/development' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
     uses: ./.github/workflows/terraform-apply.yml
     with:
       environment: dev
