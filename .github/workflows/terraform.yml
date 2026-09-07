@@ -26,6 +26,15 @@ permissions:
   id-token: write        # OIDC federated credential
   pull-requests: write   # plan summary comment
 
+# One run at a time per environment. Every job here talks to the same state
+# blob, and Terraform's own lock turns an overlap into a failed run rather
+# than a corrupted state - which is the right outcome, but a queue is a better
+# one. Not cancel-in-progress: killing a run mid-apply is how a lock gets left
+# behind holding a lease nobody owns.
+concurrency:
+  group: terraform-${{ inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
 env:
   TF_VERSION: 1.15.8
   ARM_USE_OIDC: true
@@ -177,8 +186,13 @@ jobs:
       environment: dev
     secrets: inherit
 
+  # needs: plan, not validate. Both jobs run terraform against the same state
+  # blob, so hanging them off validate started them together and they raced
+  # for the lock - plan took it, apply failed acquiring it, every dispatch.
+  # This also means a plan that cannot even authenticate skips the apply
+  # instead of failing it a second time for a different reason.
   apply-manual:
-    needs: validate
+    needs: plan
     if: github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/terraform-apply.yml
     with:
