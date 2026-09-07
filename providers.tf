@@ -3,8 +3,8 @@ provider "azurerm" {
     key_vault {
       # A destroyed vault must be recoverable - payroll secrets are not
       # something to lose to a bad plan.
-      purge_soft_delete_on_destroy       = false
-      recover_soft_deleted_key_vaults    = true
+      purge_soft_delete_on_destroy    = false
+      recover_soft_deleted_key_vaults = true
     }
     resource_group {
       # Refuse to delete a resource group that still holds resources
