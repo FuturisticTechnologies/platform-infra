@@ -157,6 +157,35 @@ masked in logs — which makes an OIDC subject mismatch harder to read when one
 happens. `az ad app federated-credential list --id <app>` shows the other side
 of that comparison.
 
+## Nightly shutdown
+
+`shutdown.yml` stops what can be stopped at **17:00 London**, Monday to Friday,
+and `Run workflow ▸ start` puts it back. Nothing it does touches data or
+Terraform state.
+
+| Resource | Overnight |
+|---|---|
+| PostgreSQL Flexible Server | **stopped** — compute charge ends, storage still billed |
+| Integration hub replica | **scaled to 0** |
+| Payroll API, RTI service | already scale to zero when idle |
+| Redis, NAT Gateway, public IP, ACR, Log Analytics | **still billing** |
+
+That last row is the honest part: those bill by the hour whether or not
+anything uses them, and Azure has no way to stop them — only to delete them.
+If the idle cost still looks wrong after this, deleting them nightly is the
+next step, and it is a bigger decision than a scheduled job should take on its
+own: the NAT Gateway's public IP is the address HMRC would allowlist, and it
+changes when it is recreated.
+
+GitHub cron is UTC and does not observe daylight saving, so the workflow
+carries two entries — 16:00 and 17:00 UTC — and a guard step drops whichever
+one is not 17:00 in London today. One fires, one exits immediately.
+
+Two things to know. Scheduled workflows only run from the **default branch**,
+so this does nothing until it is merged. And Terraform still owns the replica
+counts: the next `terraform apply` after a shutdown will set the hub back to
+one replica, which is drift by design rather than a bug.
+
 ## Known gaps
 
 - **No private endpoints yet.** The subnet is reserved. Key Vault, Redis and
