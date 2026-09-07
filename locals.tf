@@ -25,8 +25,9 @@ locals {
 
   # Ports the services actually listen on, from docker-compose.platform.yml.
   ports = {
-    backend = 8000
-    dotnet  = 8080
+    backend  = 8000
+    dotnet   = 8080
+    frontend = 80 # nginx serving the built Angular bundle
   }
 
   # Postgres admin login. Flexible Server reserves a handful of names
@@ -38,9 +39,10 @@ locals {
   # Terraform creates the app with a placeholder until the application
   # pipelines have pushed a real image; after that it ignores the tag entirely.
   images = {
-    backend = var.use_placeholder_images ? local.placeholder_image : "${azurerm_container_registry.acr.login_server}/payroll-backend:${var.image_tag}"
-    rti     = var.use_placeholder_images ? local.placeholder_image : "${azurerm_container_registry.acr.login_server}/hmrc-rti-service:${var.image_tag}"
-    hub     = var.use_placeholder_images ? local.placeholder_image : "${azurerm_container_registry.acr.login_server}/integration-hub:${var.image_tag}"
+    backend  = var.use_placeholder_images ? local.placeholder_image : "${azurerm_container_registry.acr.login_server}/payroll-backend:${var.image_tag}"
+    rti      = var.use_placeholder_images ? local.placeholder_image : "${azurerm_container_registry.acr.login_server}/hmrc-rti-service:${var.image_tag}"
+    hub      = var.use_placeholder_images ? local.placeholder_image : "${azurerm_container_registry.acr.login_server}/integration-hub:${var.image_tag}"
+    frontend = var.use_placeholder_images ? local.placeholder_image : "${azurerm_container_registry.acr.login_server}/payroll-frontend:${var.image_tag}"
   }
 }
 

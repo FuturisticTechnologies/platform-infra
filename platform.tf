@@ -188,8 +188,11 @@ resource "azurerm_key_vault_secret" "postgres_connection" {
 }
 
 resource "azurerm_key_vault_secret" "redis_url" {
-  name         = "redis-url"
-  value        = "rediss://:${azurerm_redis_cache.redis.primary_access_key}@${azurerm_redis_cache.redis.hostname}:${azurerm_redis_cache.redis.ssl_port}/0"
+  name = "redis-url"
+  # Managed Redis keeps the key and port on the default database and the
+  # hostname on the cluster. The port is not 6380 - Managed Redis listens on
+  # 10000 - so it is read rather than written down.
+  value        = "rediss://:${azurerm_managed_redis.redis.default_database[0].primary_access_key}@${azurerm_managed_redis.redis.hostname}:${azurerm_managed_redis.redis.default_database[0].port}/0"
   key_vault_id = azurerm_key_vault.kv.id
   content_type = "connection-string"
   tags         = local.tags

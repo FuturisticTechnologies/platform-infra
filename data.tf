@@ -73,17 +73,41 @@ resource "azurerm_postgresql_flexible_server_configuration" "connection_throttli
 
 # --- Redis ---------------------------------------------------------------
 # Rate limiting and background job coordination (PLAT-01).
+#
+# Azure Managed Redis (Microsoft.Cache/redisEnterprise), not Azure Cache for
+# Redis. The classic service is retiring and the API now refuses new instances
+# outright - a create returns 400 with "Azure Cache for Redis is retiring,
+# create Azure Managed Redis instead", so azurerm_redis_cache is not a thing
+# that can be provisioned any more, at any SKU.
+#
+# Managed Redis is offered in UK South, so this stays in region.
+#
+# It has no Basic tier and no scale-to-zero: the smallest SKU bills around the
+# clock. That is not a new cost so much as a larger one - the shutdown job
+# already notes Redis cannot be stopped, only deleted - but dev is now roughly
+# £40/month for this resource rather than £12.
 
-resource "azurerm_redis_cache" "redis" {
+resource "azurerm_managed_redis" "redis" {
   name                = "redis-${local.name}"
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
-  capacity            = var.redis_capacity
-  family              = var.redis_sku == "Premium" ? "P" : "C"
   sku_name            = var.redis_sku
-  minimum_tls_version = "1.2"
 
-  non_ssl_port_enabled = false
+  # Balanced_B0 is a single node. High availability is a production concern and
+  # doubles the bill, so it follows the environment rather than being on.
+  high_availability_enabled = local.is_production
+
+  default_database {
+    client_protocol = "Encrypted" # TLS only, as the classic cache was
+
+    # EnterpriseCluster, not OSSCluster: the proxy presents a single endpoint
+    # so ordinary non-cluster-aware clients keep working. redis-py and
+    # StackExchange.Redis are both configured here as if this were one node,
+    # and OSSCluster would mean changing both.
+    clustering_policy = "EnterpriseCluster"
+
+    eviction_policy = "VolatileLRU"
+  }
 
   tags = local.tags
 }

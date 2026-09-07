@@ -11,8 +11,7 @@ postgres_storage_mb            = 32768
 postgres_ha_enabled            = false
 postgres_backup_retention_days = 7
 
-redis_sku      = "Basic"
-redis_capacity = 0
+redis_sku = "Balanced_B0"
 
 hmrc_base_url              = "https://test-api.service.hmrc.gov.uk"
 hmrc_allow_live_submission = false
