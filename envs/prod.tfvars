@@ -11,8 +11,7 @@ postgres_storage_mb            = 262144
 postgres_ha_enabled            = true
 postgres_backup_retention_days = 35
 
-redis_sku      = "Standard"
-redis_capacity = 1
+redis_sku = "Balanced_B3"
 
 # Live filing is enabled here and nowhere else. The precondition in locals.tf
 # refuses this combination in any other environment.
