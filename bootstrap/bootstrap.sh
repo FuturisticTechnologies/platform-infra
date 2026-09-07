@@ -185,15 +185,18 @@ TENANT_ID=$(az account show --query tenantId -o tsv)
 
 cat <<EOF
 
-Done. Add these as GitHub repository secrets (Settings > Secrets and
-variables > Actions > Secrets). None is a credential in itself - there is no
-client secret to store - but they are held as secrets by house rule:
+Done. Add these as GitHub *environment* secrets on the environment this
+subscription serves (Settings > Environments > <env> > Environment secrets),
+not at repository level - so a higher environment can carry its own
+subscription and app registration later:
 
   AZURE_CLIENT_ID        ${APP_ID}
   AZURE_TENANT_ID        ${TENANT_ID}
   AZURE_SUBSCRIPTION_ID  ${SUBSCRIPTION_ID}
 
-Then create the dev environment in GitHub. Staging and production are not
-wired into the pipeline yet - their tfvars exist, nothing plans or applies
-them.
+A job only sees an environment secret if it declares that environment, so any
+job using these needs environment: <env>.
+
+Staging and production are not wired into the pipeline yet - their tfvars
+exist, nothing plans or applies them.
 EOF
