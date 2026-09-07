@@ -128,22 +128,56 @@ az role assignment create "${SUB[@]}" \
 
 # Federated credentials - no client secret is ever created, so there is no
 # secret to rotate, leak or expire.
-for SUBJECT in \
-  "repo:${GITHUB_REPO}:ref:refs/heads/main" \
-  "repo:${GITHUB_REPO}:pull_request" \
-  "repo:${GITHUB_REPO}:environment:dev" \
-  "repo:${GITHUB_REPO}:environment:staging" \
-  "repo:${GITHUB_REPO}:environment:prod"
-do
-  NAME=$(echo "$SUBJECT" | tr ':/' '--')
-  NAME="${NAME:0:120}"
+#
+# Two forms of every subject. GitHub can be configured to put immutable
+# numeric ids in the OIDC subject claim, in which case the token presents
+#   repo:Org@123/repo@456:pull_request
+# rather than
+#   repo:Org/repo:pull_request
+# and a credential matching only the second form is refused with AADSTS700213.
+# Which form arrives is an organisation setting, so create both and let the
+# token match whichever applies.
+SUBJECT_SUFFIXES=(
+  "ref:refs/heads/main"
+  "ref:refs/heads/development"
+  "pull_request"
+  "environment:dev"
+)
+
+SUBJECTS=()
+for SUFFIX in "${SUBJECT_SUFFIXES[@]}"; do
+  SUBJECTS+=("repo:${GITHUB_REPO}:${SUFFIX}")
+done
+
+# The id form needs the numeric owner and repository ids, which come from the
+# GitHub API. Skipped without gh - the name form still works unless the
+# organisation has opted into immutable subjects.
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  REPO_ID=$(gh api "repos/${GITHUB_REPO}" -q .id 2>/dev/null || true)
+  OWNER_ID=$(gh api "repos/${GITHUB_REPO}" -q .owner.id 2>/dev/null || true)
+  if [ -n "$REPO_ID" ] && [ -n "$OWNER_ID" ]; then
+    OWNER="${GITHUB_REPO%%/*}"
+    NAME_ONLY="${GITHUB_REPO##*/}"
+    for SUFFIX in "${SUBJECT_SUFFIXES[@]}"; do
+      SUBJECTS+=("repo:${OWNER}@${OWNER_ID}/${NAME_ONLY}@${REPO_ID}:${SUFFIX}")
+    done
+  fi
+else
+  echo "    gh not available - only name-based subjects created."
+  echo "    If a run fails with AADSTS700213, the organisation uses immutable"
+  echo "    subject claims and the id-based credentials must be added."
+fi
+
+INDEX=0
+for SUBJECT in "${SUBJECTS[@]}"; do
+  INDEX=$((INDEX + 1))
   EXISTING=$(az ad app federated-credential list --id "$APP_ID" --query "[?subject=='${SUBJECT}'] | [0].id" -o tsv)
   if [ -n "$EXISTING" ]; then
     echo "    exists: $SUBJECT"
     continue
   fi
   # One line on purpose - a multi-line JSON argument is fragile across shells.
-  az ad app federated-credential create --id "$APP_ID" --parameters "{\"name\":\"${NAME}\",\"issuer\":\"https://token.actions.githubusercontent.com\",\"subject\":\"${SUBJECT}\",\"audiences\":[\"api://AzureADTokenExchange\"]}" --output none
+  az ad app federated-credential create --id "$APP_ID" --parameters "{\"name\":\"gh-${INDEX}\",\"issuer\":\"https://token.actions.githubusercontent.com\",\"subject\":\"${SUBJECT}\",\"audiences\":[\"api://AzureADTokenExchange\"]}" --output none
   echo "    added: $SUBJECT"
 done
 
@@ -158,6 +192,7 @@ are sensitive, and there is no client secret to store):
   AZURE_TENANT_ID        ${TENANT_ID}
   AZURE_SUBSCRIPTION_ID  ${SUBSCRIPTION_ID}
 
-Then create the dev, staging and prod GitHub environments, with required
-reviewers on staging and prod.
+Then create the dev environment in GitHub. Staging and production are not
+wired into the pipeline yet - their tfvars exist, nothing plans or applies
+them.
 EOF

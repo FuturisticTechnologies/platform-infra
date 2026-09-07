@@ -1,8 +1,8 @@
 name: infrastructure
 
-# Plan on every pull request, apply on merge. Environments carry the approval
-# gates, so a production change is reviewed twice: once as code, once at the
-# point it is applied.
+# dev only, for now. Staging and production are not wired into this pipeline:
+# their tfvars and backend configs still exist under envs/, but nothing plans
+# or applies them until somebody decides to bring them in.
 
 on:
   pull_request:
@@ -14,8 +14,9 @@ on:
       environment:
         description: Environment to apply
         required: true
+        default: dev
         type: choice
-        options: [dev, staging, prod]
+        options: [dev]
 
 permissions:
   contents: read
@@ -59,10 +60,6 @@ jobs:
   plan:
     needs: validate
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        environment: [dev, staging, prod]
     steps:
       - uses: actions/checkout@v4
 
@@ -88,14 +85,14 @@ jobs:
           fi
 
       - name: Init
-        run: terraform init -backend-config=envs/backend-${{ matrix.environment }}.hcl
+        run: terraform init -backend-config=envs/backend-dev.hcl
 
       - name: Plan
         id: plan
         run: |
           terraform plan \
-            -var-file=envs/${{ matrix.environment }}.tfvars \
-            -out=tfplan-${{ matrix.environment }} \
+            -var-file=envs/dev.tfvars \
+            -out=tfplan-dev \
             -detailed-exitcode -no-color | tee plan.txt
         continue-on-error: true
 
@@ -118,7 +115,7 @@ jobs:
             const plan = fs.readFileSync('plan.txt', 'utf8');
             const summary = plan.match(/^Plan: .*$/m)?.[0] ?? 'No changes.';
             const body = [
-              `### Terraform plan — \`${{ matrix.environment }}\``,
+              '### Terraform plan — `dev`',
               '',
               `**${summary}**`,
               '',
@@ -138,22 +135,16 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tfplan-${{ matrix.environment }}
-          path: tfplan-${{ matrix.environment }}
+          name: tfplan-dev
+          path: tfplan-dev
           retention-days: 5
 
-  # dev applies automatically from the development branch. Staging and
-  # production do NOT apply on a merge - they are deliberately manual.
-  #
-  # The original design put the approval gate on the GitHub environment, but
+  # dev applies automatically from the development branch, and can be applied
+  # from any branch with the manual dispatch. There is no approval gate:
   # required reviewers need Pro/Team/Enterprise on a private repository and
-  # this one is on Free. Without that rule an environment is only a label, and
-  # a merge to main would build the production stack - zone-redundant
-  # Postgres, GZRS storage, always-warm replicas - with nobody in the loop.
-  #
-  # So the gate is the workflow_dispatch itself: someone chooses the
-  # environment and presses the button. Move these back to `push` once the
-  # plan supports required reviewers.
+  # this one is on Free, so a GitHub environment is only a label here. That is
+  # tolerable for dev and would not be for production - which is one more
+  # reason staging and prod are not wired in yet.
   apply-dev:
     needs: plan
     if: github.ref == 'refs/heads/development' && github.event_name == 'push'
