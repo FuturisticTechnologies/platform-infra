@@ -185,8 +185,9 @@ TENANT_ID=$(az account show --query tenantId -o tsv)
 
 cat <<EOF
 
-Done. Add these as GitHub repository variables (not secrets - none of them
-are sensitive, and there is no client secret to store):
+Done. Add these as GitHub repository secrets (Settings > Secrets and
+variables > Actions > Secrets). None is a credential in itself - there is no
+client secret to store - but they are held as secrets by house rule:
 
   AZURE_CLIENT_ID        ${APP_ID}
   AZURE_TENANT_ID        ${TENANT_ID}
