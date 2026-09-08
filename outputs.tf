@@ -8,12 +8,12 @@ output "payroll_api_url" {
 }
 
 output "rti_service_url" {
-  description = "Internal only - resolvable from inside the Container Apps environment."
+  description = "Public when expose_dotnet_services is true, otherwise resolvable only from inside the Container Apps environment."
   value       = module.rti.url
 }
 
 output "integration_hub_url" {
-  description = "Internal only."
+  description = "Public when expose_dotnet_services is true, otherwise internal to the Container Apps environment."
   value       = module.hub.url
 }
 

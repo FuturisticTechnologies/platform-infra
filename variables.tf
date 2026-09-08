@@ -130,6 +130,12 @@ variable "hmrc_allow_live_submission" {
   default     = false
 }
 
+variable "expose_dotnet_services" {
+  description = "Gives the RTI service and the integration hub public ingress so their Swagger UI is reachable from a browser. Off by default and refused in production: these are internal services, and turning it on publishes their whole API surface - /swagger and /openapi.json answer anonymously, so the schema becomes readable by anyone even though the operations themselves stay bearer-gated."
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags applied to every resource."
   type        = map(string)

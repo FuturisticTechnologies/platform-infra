@@ -85,8 +85,9 @@ module "backend" {
 }
 
 # --- HMRC RTI submissions (.NET 10, M6-M7) -------------------------------
-# Internal ingress: nothing outside the environment calls this directly, and
-# it is the only service that talks to HMRC.
+# Internal by default: nothing outside the environment calls this directly, and
+# it is the only service that talks to HMRC. expose_dotnet_services opens it up
+# so the Swagger UI can be read in a browser - dev only, refused in production.
 
 module "rti" {
   source = "./modules/container-app"
@@ -99,7 +100,7 @@ module "rti" {
   image                        = local.images.rti
 
   target_port      = local.ports.dotnet
-  external_ingress = false
+  external_ingress = var.expose_dotnet_services
   health_path      = "/api/v1/health"
   ready_path       = "/api/v1/health/ready"
 
@@ -143,7 +144,7 @@ module "hub" {
   image                        = local.images.hub
 
   target_port      = local.ports.dotnet
-  external_ingress = false
+  external_ingress = var.expose_dotnet_services
   health_path      = "/api/v1/health"
   ready_path       = "/api/v1/health/ready"
 
