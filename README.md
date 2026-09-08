@@ -196,6 +196,29 @@ resource group — not the subscription Owner the Terraform principal needs.
 Its object id goes in `deploy_principal_object_id`; leave it null and both role
 assignments are simply omitted.
 
+Create or repair it with:
+
+```bash
+./bootstrap/app-deploy-identity.sh <subscription-id> \
+  FuturisticTechnologies/national-insurance \
+  FuturisticTechnologies/hmrc-rti-service \
+  FuturisticTechnologies/integration-hub
+```
+
+Re-running is safe — existing credentials are reported and skipped.
+
+If a deploy fails at sign-in with **AADSTS700213**, this is the fix. The error
+names the subject GitHub presented, and it will carry numeric ids:
+
+```
+repo:Org@316165782/national-insurance@1334283527:environment:dev
+```
+
+That is the immutable subject form, which this organisation issues. A
+credential registered only as `repo:Org/repo:environment:dev` does not match
+it. The script registers both forms for every repository, so whichever the
+organisation is set to emit will match.
+
 ## Nightly shutdown
 
 `shutdown.yml` stops what can be stopped at **17:00 London**, Monday to Friday,
