@@ -1,5 +1,9 @@
-name: shutdown
+name: start or stop
 
+# The workflow does both directions, so it is named for the choice rather than
+# for one side of it. A green tick labelled "shutdown" on a run that started
+# the environment reads as the opposite of what happened.
+#
 # Stops the parts of an environment that can be stopped, on a weekday evening.
 #
 # Cost, honestly: this saves the Postgres compute charge and the integration
@@ -11,6 +15,10 @@ name: shutdown
 #
 # Nothing here touches data or Terraform state. `start` puts it back, and so
 # does a normal `terraform apply`.
+
+# Names the run itself, so the Actions list reads "start - dev" rather than
+# the workflow name repeated down the page.
+run-name: ${{ inputs.action || 'stop' }} - ${{ inputs.environment || 'dev' }}
 
 on:
   schedule:
@@ -39,7 +47,8 @@ permissions:
   id-token: write
 
 jobs:
-  shutdown:
+  start-or-stop:
+    name: ${{ inputs.action || 'stop' }} ${{ inputs.environment || 'dev' }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || 'dev' }}
 
@@ -140,11 +149,17 @@ jobs:
       - name: Summary
         if: env.SKIP != 'true'
         run: |
+          # "start" + "ped" is "startped". The past tense is irregular
+          # enough to be worth spelling out.
+          case "$ACTION" in
+            start) VERB=started ;;
+            stop)  VERB=stopped ;;
+          esac
           {
             echo "### ${ACTION} — ${ENVIRONMENT}"
             echo
             echo "Postgres compute and the always-on container replica are"
-            echo "${ACTION}ped. Redis, the NAT gateway, the public IP, the"
-            echo "container registry and Log Analytics continue to bill:"
-            echo "they cannot be stopped, only deleted."
+            echo "${VERB}. Redis, the NAT gateway, the public IP, the"
+            echo "container registry and Log Analytics are untouched either"
+            echo "way: they bill by the hour and can only be deleted."
           } >> "$GITHUB_STEP_SUMMARY"
