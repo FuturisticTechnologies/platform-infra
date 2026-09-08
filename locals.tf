@@ -58,5 +58,12 @@ resource "terraform_data" "hmrc_live_submission_guard" {
       condition     = !local.is_production || var.postgres_ha_enabled
       error_message = "production requires postgres_ha_enabled = true to meet the 15 minute RPO."
     }
+    # Convenience in dev, never in production. The RTI service holds the HMRC
+    # credentials and is the platform's only route to HMRC; a browsable Swagger
+    # page is not worth putting it on the public internet.
+    precondition {
+      condition     = !var.expose_dotnet_services || !local.is_production
+      error_message = "expose_dotnet_services may not be true in the prod environment."
+    }
   }
 }

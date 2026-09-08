@@ -16,5 +16,10 @@ redis_sku = "Balanced_B0"
 hmrc_base_url              = "https://test-api.service.hmrc.gov.uk"
 hmrc_allow_live_submission = false
 
+# Dev only. Makes the RTI service and the integration hub reachable at their
+# container app FQDNs, so their Swagger UI opens in a browser instead of having
+# to be curled from inside the environment.
+expose_dotnet_services = true
+
 cors_origins               = ["http://localhost:4200"]
 deploy_principal_object_id = "619fb10a-4a93-4795-a7d0-2ccdd76c7362"
