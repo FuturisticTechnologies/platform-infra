@@ -71,6 +71,28 @@ resource "azurerm_postgresql_flexible_server_configuration" "connection_throttli
   value     = "on"
 }
 
+# Azure Database for PostgreSQL refuses CREATE EXTENSION for anything not named
+# here, whatever rights the user holds, with
+#
+#   0A000: extension "pgcrypto" is not allow-listed for users in
+#          Azure Database for PostgreSQL
+#
+# It is a server parameter rather than a grant, so it belongs in Terraform next
+# to the server and not in a runbook step somebody performs once by hand.
+#
+# The three are what the migrations actually ask for, and no more:
+#   pgcrypto    the .NET services' 0001 schema migration
+#   citext      case-insensitive email and reference columns
+#   btree_gist  the exclusion constraints on effective-dated rows
+#
+# Nothing restarts. azure.extensions is a dynamic parameter, so this takes
+# effect on the next connection.
+resource "azurerm_postgresql_flexible_server_configuration" "extensions" {
+  name      = "azure.extensions"
+  server_id = azurerm_postgresql_flexible_server.pg.id
+  value     = "PGCRYPTO,CITEXT,BTREE_GIST"
+}
+
 # --- Redis ---------------------------------------------------------------
 # Rate limiting and background job coordination (PLAT-01).
 #
