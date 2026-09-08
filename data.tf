@@ -105,9 +105,10 @@ resource "azurerm_postgresql_flexible_server_configuration" "extensions" {
 # Managed Redis is offered in UK South, so this stays in region.
 #
 # It has no Basic tier and no scale-to-zero: the smallest SKU bills around the
-# clock. That is not a new cost so much as a larger one - the shutdown job
-# already notes Redis cannot be stopped, only deleted - but dev is now roughly
-# £40/month for this resource rather than £12.
+# clock, which is why the start-or-stop job says Redis cannot be stopped, only
+# deleted. Cost is close to a wash: Balanced_B0 is £0.018/hour, about £13 a
+# month, against roughly £12 for the Basic C0 it replaces. An earlier version
+# of this comment said £40; that was a guess, and it was wrong.
 
 resource "azurerm_managed_redis" "redis" {
   name                = "redis-${local.name}"

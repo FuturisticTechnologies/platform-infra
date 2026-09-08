@@ -219,11 +219,16 @@ credential registered only as `repo:Org/repo:environment:dev` does not match
 it. The script registers both forms for every repository, so whichever the
 organisation is set to emit will match.
 
-## Nightly shutdown
+## Nightly stop and start
 
-`shutdown.yml` stops what can be stopped at **17:00 London**, Monday to Friday,
-and `Run workflow ▸ start` puts it back. Nothing it does touches data or
-Terraform state.
+`start-or-stop.yml` stops what can be stopped at **17:00 London**, Monday to
+Friday, and `Run workflow ▸ start` puts it back. Nothing it does touches data
+or Terraform state.
+
+It is named for the choice rather than for one direction of it. It was called
+`shutdown`, which meant a run that started the environment finished as a green
+tick labelled "shutdown". The run title now says which way it went — `start -
+dev` or `stop - dev`.
 
 | Resource | Overnight |
 |---|---|
