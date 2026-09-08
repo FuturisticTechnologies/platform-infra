@@ -63,12 +63,12 @@ module "backend" {
   env = {
     APP_ENV   = local.app_env
     APP_DEBUG = "false"
-    # The front end is served from Static Web Apps, so it is a different
-    # origin to the API and the browser will say so. Terraform knows the
-    # hostname, so nobody has to paste it in after the fact.
+    # The front end is a separate container app, so it is a different origin
+    # to the API and the browser will say so. Terraform knows the hostname, so
+    # nobody has to paste it in after the fact.
     APP_CORS_ORIGINS = join(",", concat(
       var.cors_origins,
-      ["https://${azurerm_static_web_app.frontend.default_host_name}"],
+      ["https://${module.frontend.fqdn}"],
     ))
     JWT_ALGORITHM                   = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES = "30"
@@ -235,14 +235,45 @@ resource "azurerm_container_app_job" "migrate" {
 }
 
 # --- Angular frontend ----------------------------------------------------
-# Static Web Apps rather than a container: it is a built SPA, and this gives
-# a CDN, free certificates and a preview environment per pull request.
+# A container in the same environment as the services, not Static Web Apps.
+#
+# Static Web Apps would have been the better fit for a built SPA - CDN, free
+# certificates, a preview environment per pull request - but it exists in only
+# five regions: Central US, East US 2, West US 2, West Europe and East Asia.
+# West Europe, the nearest one and the one this used, now refuses new resources
+# with "the selected region is currently not accepting new customers". The four
+# that remain are all outside the UK and the EU.
+#
+# docs/04-security-gdpr.md commits to a UK region or equivalent customer-
+# approved hosting. Serving the bundle from a container here keeps that promise
+# without needing an exception, and reuses the environment already running in
+# UK South. It scales to zero like everything else.
+#
+# What it costs: no built-in CDN, no per-pull-request previews, and certificates
+# come from the Container Apps environment rather than free from the platform.
+# If Static Web Apps opens up in a UK region, this is worth revisiting.
 
-resource "azurerm_static_web_app" "frontend" {
-  name                = "stapp-${local.name}"
-  location            = "westeurope" # Static Web Apps is not offered in uksouth
-  resource_group_name = azurerm_resource_group.rg.name
-  sku_tier            = local.is_production ? "Standard" : "Free"
-  sku_size            = local.is_production ? "Standard" : "Free"
-  tags                = local.tags
+module "frontend" {
+  source = "./modules/container-app"
+
+  name                         = "ca-${local.name}-frontend"
+  resource_group_name          = azurerm_resource_group.rg.name
+  container_app_environment_id = azurerm_container_app_environment.cae.id
+  identity_id                  = azurerm_user_assigned_identity.app.id
+  registry_server              = azurerm_container_registry.acr.login_server
+  image                        = local.images.frontend
+
+  target_port      = local.ports.frontend
+  external_ingress = true
+
+  # A static bundle behind nginx: index.html is the readiness signal, because
+  # there is no application to be unready.
+  health_path = "/"
+
+  min_replicas = max(var.aca_min_replicas, local.is_production ? 2 : 0)
+  max_replicas = var.aca_max_replicas
+  cpu          = 0.25
+  memory       = "0.5Gi"
+
+  tags = local.tags
 }

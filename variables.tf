@@ -67,14 +67,17 @@ variable "postgres_backup_retention_days" {
   default     = 7
 }
 
-variable "redis_capacity" {
-  type    = number
-  default = 0
-}
-
+# Azure Managed Redis names size and family in one string - Balanced_B0,
+# MemoryOptimized_M10, ComputeOptimized_X3 and so on. The classic pairing of a
+# tier with a numeric capacity is gone, so redis_capacity went with it.
 variable "redis_sku" {
   type    = string
-  default = "Basic"
+  default = "Balanced_B0"
+
+  validation {
+    condition     = can(regex("^(Balanced|MemoryOptimized|ComputeOptimized|FlashOptimized)_[A-Z][0-9]+$", var.redis_sku))
+    error_message = "redis_sku must be an Azure Managed Redis SKU such as Balanced_B0. Azure Cache for Redis tiers (Basic, Standard, Premium) are retired and cannot be created."
+  }
 }
 
 variable "aca_min_replicas" {

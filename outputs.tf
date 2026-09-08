@@ -17,8 +17,9 @@ output "integration_hub_url" {
   value       = module.hub.url
 }
 
-output "frontend_hostname" {
-  value = azurerm_static_web_app.frontend.default_host_name
+output "frontend_url" {
+  description = "The Angular app. A container in this environment, not Static Web Apps - see apps.tf."
+  value       = module.frontend.url
 }
 
 output "container_registry" {
