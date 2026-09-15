@@ -38,8 +38,9 @@ jobs:
       - name: Check pipeline identity is configured
         run: |
           if [ -z "$ARM_CLIENT_ID" ] || [ -z "$ARM_TENANT_ID" ] || [ -z "$ARM_SUBSCRIPTION_ID" ]; then
-            echo "::error::AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID must be set as repository secrets."
-            echo "Run ./bootstrap/bootstrap.sh <subscription-id> <org>/<repo> and add the values it prints."
+            echo "::error::AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID must be set as environment secrets on the '${{ inputs.environment }}' environment."
+            echo "Run ./bootstrap/bootstrap.sh <subscription-id> <org>/<repo> and add the values it prints under"
+            echo "Settings > Environments > ${{ inputs.environment }} > Environment secrets - not as repository secrets."
             exit 1
           fi
 
