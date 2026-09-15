@@ -25,8 +25,10 @@ variable "prefix" {
   default     = "ftpay"
 
   validation {
-    condition     = can(regex("^[a-z][a-z0-9]{2,9}$", var.prefix))
-    error_message = "prefix must be 3-10 lowercase alphanumerics - it seeds globally unique names."
+    # Capped by the longest name built from it: ca-<prefix>-staging-integration-hub
+    # is 27 characters plus the prefix, and Azure allows a container app 32.
+    condition     = can(regex("^[a-z][a-z0-9]{2,4}$", var.prefix))
+    error_message = "prefix must be 3-5 lowercase alphanumerics - it seeds globally unique names, and anything longer pushes ca-<prefix>-staging-integration-hub past Azure's 32 character limit for a container app."
   }
 }
 
@@ -40,6 +42,17 @@ variable "vnet_cidr" {
   description = "Address space for the platform VNet."
   type        = string
   default     = "10.60.0.0/16"
+
+  # locals.tf carves fixed offsets out of this: a /23 for Container Apps and two
+  # /24s. From anything smaller than a /16 those come out as /31s and /32s,
+  # which plan cleanly and which Azure then refuses at apply.
+  validation {
+    condition = can(regex("^[0-9.]+/[0-9]+$", var.vnet_cidr)) && try(
+      tonumber(split("/", var.vnet_cidr)[1]) <= 16 && cidrsubnet(var.vnet_cidr, 0, 0) == var.vnet_cidr,
+      false,
+    )
+    error_message = "vnet_cidr must be an IPv4 network address of /16 or larger, written with its host bits zero - for example 10.60.0.0/16."
+  }
 }
 
 # --------------------------------------------------------------- sizing

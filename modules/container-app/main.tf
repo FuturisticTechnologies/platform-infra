@@ -113,5 +113,18 @@ resource "azurerm_container_app" "this" {
       template[0].container[0].image,
       ingress[0].traffic_weight,
     ]
+
+    # Both of these plan cleanly and are refused by Azure only at apply.
+    # Production lifts min_replicas to 2 for the public apps in apps.tf, so an
+    # aca_max_replicas of 1 there is enough to trip the first.
+    precondition {
+      condition     = var.min_replicas <= var.max_replicas
+      error_message = "${var.name}: min_replicas (${var.min_replicas}) is greater than max_replicas (${var.max_replicas})."
+    }
+
+    precondition {
+      condition     = try(endswith(var.memory, "Gi") && tonumber(trimsuffix(var.memory, "Gi")) == var.cpu * 2, false)
+      error_message = "${var.name}: the Consumption profile takes memory at twice the cpu, in Gi - 0.25/0.5Gi, 0.5/1Gi, 1/2Gi and so on. Got cpu ${var.cpu} with memory ${var.memory}."
+    }
   }
 }

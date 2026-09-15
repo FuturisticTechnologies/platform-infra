@@ -89,8 +89,17 @@ jobs:
           set -euo pipefail
           RG="rg-${PREFIX}-${ENVIRONMENT}"
 
-          if ! az group show -n "$RG" -o none 2>/dev/null; then
-            echo "::notice::Resource group $RG does not exist - nothing to $ACTION."
+          # `az group exists` says false only when the group is not there. A
+          # sign-in, permission or wrong-subscription failure is an error, and
+          # set -e stops on it - `az group show 2>/dev/null` used to read all
+          # of those as "does not exist" and finish green.
+          EXISTS=$(az group exists -n "$RG")
+          if [ "$EXISTS" != "true" ]; then
+            if [ "$ACTION" = "start" ]; then
+              echo "::error::Resource group $RG does not exist - there is no environment to start."
+              exit 1
+            fi
+            echo "::notice::Resource group $RG does not exist - nothing to stop."
             exit 0
           fi
 
@@ -103,6 +112,13 @@ jobs:
           echo "Postgres       : ${SERVERS:-none}"
           echo "Container apps : ${APPS:-none}"
           echo
+
+          # Every environment has both. An empty list means the group is not
+          # the one Terraform built, and the summary would claim work not done.
+          if [ -z "$SERVERS" ] || [ -z "$APPS" ]; then
+            echo "::error::$RG has no Postgres server or no container apps, so there is nothing here to $ACTION."
+            exit 1
+          fi
 
           if [ "$ACTION" = "stop" ]; then
             for S in $SERVERS; do
@@ -136,14 +152,22 @@ jobs:
             # Terraform owns the real replica counts. Restoring the hub here
             # covers the common case; a `terraform apply` restores everything
             # to whatever the configuration says.
+            RESTORED=0
             for A in $APPS; do
               case "$A" in
                 *integration-hub)
                   echo "scaling   $A back to 1 replica"
                   az containerapp update -g "$RG" -n "$A" --min-replicas 1 --output none
+                  RESTORED=$((RESTORED + 1))
                   ;;
               esac
             done
+
+            # A hub left at zero delivers nothing and nothing wakes it.
+            if [ "$RESTORED" -eq 0 ]; then
+              echo "::error::No integration hub found in $RG to scale back to 1 replica - run terraform apply to restore it."
+              exit 1
+            fi
           fi
 
       - name: Summary
