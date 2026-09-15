@@ -1,6 +1,7 @@
 # Terraform
+# .terraform.lock.hcl is committed on purpose: it pins the provider versions
+# and hashes CI uses. Do not add it back here.
 .terraform/
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfplan
