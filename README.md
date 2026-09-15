@@ -224,7 +224,7 @@ does it; outside a release:
    — and put the `deploy_principal_object_id` it prints into `envs/<env>.tfvars`.
 
 Both scripts register federated credentials for `environment:dev` only
-(`bootstrap.sh` adds the `main`, `development` and `pull_request` subjects), so
+(`bootstrap.sh` adds the `main`, `dev` and `pull_request` subjects), so
 a staging or prod environment needs `environment:<env>` added to their
 `SUBJECT_SUFFIXES` first. Run `gh auth login` beforehand so the id-form
 subjects are registered as well.

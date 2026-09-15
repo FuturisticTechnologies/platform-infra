@@ -139,7 +139,7 @@ az role assignment create "${SUB[@]}" \
 # token match whichever applies.
 SUBJECT_SUFFIXES=(
   "ref:refs/heads/main"
-  "ref:refs/heads/development"
+  "ref:refs/heads/dev"
   "pull_request"
   "environment:dev"
 )
