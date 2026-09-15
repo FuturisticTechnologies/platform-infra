@@ -13,8 +13,10 @@ name: start or stop
 # idle cost still looks wrong after this, deleting those is the next step, and
 # it is a bigger decision than a nightly job should make on its own.
 #
-# Nothing here touches data or Terraform state. `start` puts it back, and so
-# does a normal `terraform apply`.
+# Nothing here touches data or Terraform state. `start` puts it back. A normal
+# `terraform apply` does not: it restores the container apps' replica counts,
+# but this configuration never manages whether the Postgres server is running,
+# so a stopped server stays stopped until `start` runs.
 
 # Names the run itself, so the Actions list reads "start - dev" rather than
 # the workflow name repeated down the page.
@@ -150,8 +152,9 @@ jobs:
             done
 
             # Terraform owns the real replica counts. Restoring the hub here
-            # covers the common case; a `terraform apply` restores everything
-            # to whatever the configuration says.
+            # covers the common case; a `terraform apply` restores every app's
+            # replicas to whatever the configuration says, but it never starts
+            # a stopped Postgres server - only the loop above does that.
             RESTORED=0
             for A in $APPS; do
               case "$A" in
