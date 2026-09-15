@@ -43,8 +43,8 @@ checking it and reading a plan — not for applying it (see
 | Tool | Version | What it is for |
 |---|---|---|
 | Terraform | **1.15.8** — what both workflows install (`TF_VERSION` in `terraform.yml`, pinned in `terraform-apply.yml`). `versions.tf` only requires `>= 1.9.0`; there is no `.terraform-version` file | Everything below |
-| azurerm provider | `~> 4.0` (`versions.tf` and the module). `.terraform.lock.hcl` is git-ignored, so every `terraform init` takes the newest 4.x — 4.81.0 at the time of writing | Installed by `terraform init`, not by hand |
-| random provider | `~> 3.6` (3.9.x resolves) | Generated Postgres password and JWT key; installed by `terraform init` |
+| azurerm provider | **4.81.0**, pinned by the committed `.terraform.lock.hcl` (`versions.tf` and the module only ask for `~> 4.0`) | Installed by `terraform init`, not by hand |
+| random provider | **3.9.1**, pinned by the same lock file (`~> 3.6` in `versions.tf`) | Generated Postgres password and JWT key; installed by `terraform init` |
 | Azure CLI (`az`) | Not pinned; any current 2.x | `az login` for local credentials, the bootstrap scripts, `az containerapp` commands (the extension installs itself on first use) |
 | Git | Any | Clone and branch |
 | Bash | Git Bash on Windows | Running `bootstrap/*.sh`. They set `MSYS_NO_PATHCONV` themselves, so Git Bash does not mangle `/subscriptions/...` arguments |
@@ -55,6 +55,14 @@ checking it and reading a plan — not for applying it (see
 not need it locally. On Windows, `winget install Hashicorp.Terraform`,
 `winget install Microsoft.AzureCLI` and `winget install GitHub.cli` cover the
 tools; check `terraform version` reports 1.15.8.
+
+**Provider versions are locked.** `.terraform.lock.hcl` is committed, with
+hashes for `linux_amd64` (the CI runners) and `windows_amd64`, so a plan on a
+laptop and in CI use the same providers. Upgrading one is a reviewed change:
+`terraform init -upgrade -backend=false`, then
+`terraform providers lock -platform=linux_amd64 -platform=windows_amd64`, and
+commit the lock file — the pull request's plan shows what the new version does.
+On another platform, `init` adds its own hash to the lock file; commit that too.
 
 **Access.** Tools are the easy half. To go further than `validate` you need:
 
