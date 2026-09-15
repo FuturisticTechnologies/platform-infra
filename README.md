@@ -3,11 +3,10 @@
 Terraform for the PayrollFuturistic platform on Azure Container Apps. One root
 module, no click-ops.
 
-> **Dev only, and not applied yet.** `terraform validate` passes against
-> azurerm 4.81, and `terraform plan` against the FT-DEV subscription reports
-> **50 to add, 0 to change, 0 to destroy** — so the graph is real, but nothing
-> has been created. Staging and production configs exist under `envs/` and are
-> not wired into the pipeline.
+> **Dev only, applied by the pipeline.** The dev environment lives in
+> `rg-ftpay-dev` (uksouth), and every push to `dev` plans and applies it.
+> Staging and production configs exist under `envs/` and are not wired into the
+> pipeline.
 
 ## What it builds
 
@@ -15,8 +14,9 @@ module, no click-ops.
 |---|---|
 | Container Apps environment | VNet-integrated, one Consumption workload profile |
 | `ca-…-payroll-api` | FastAPI, port 8000, **external** ingress |
-| `ca-…-hmrc-rti` | .NET 10, port 8080, internal only — the only service that talks to HMRC |
-| `ca-…-integration-hub` | .NET 10, port 8080, internal only, `min_replicas = 1` |
+| `ca-…-hmrc-rti` | .NET 10, port 8080 — the only service that talks to HMRC. Internal by default; **public in dev** (`expose_dotnet_services = true`) so its Swagger UI opens in a browser |
+| `ca-…-integration-hub` | .NET 10, port 8080, `min_replicas = 1`. Internal by default; public in dev, as above |
+| `ca-…-frontend` | nginx serving the Angular bundle, port 80, **external** ingress — a container app, not Static Web Apps (see `apps.tf`) |
 | `caj-…-migrate` | Alembic, manually triggered |
 | PostgreSQL Flexible Server 16 | VNet-integrated, no public endpoint, optional zone-redundant HA |
 | Redis | Rate limiting and background jobs (PLAT-01) |
@@ -26,35 +26,226 @@ module, no click-ops.
 | Container Registry | Images; pulled with the workload identity, admin user disabled |
 | Log Analytics + App Insights | Metrics, traces and alerting (PLAT-02) |
 | NAT Gateway + static IP | One stable egress address — the one HMRC would allowlist |
-| Static Web App | Angular frontend |
 
 Ports, environment variable names and health paths come from
 `docker-compose.platform.yml` and the services' own code, so the cloud contract
 matches the one the team runs locally. Nothing is set that the applications do
 not read.
 
-## First run
+## Working on it from your machine
+
+Terraform runs for real in GitHub Actions. A laptop is for writing a change,
+checking it and reading a plan — not for applying it (see
+[How changes reach Azure](#how-changes-reach-azure)).
+
+### Prerequisites
+
+| Tool | Version | What it is for |
+|---|---|---|
+| Terraform | **1.15.8** — what both workflows install (`TF_VERSION` in `terraform.yml`, pinned in `terraform-apply.yml`). `versions.tf` only requires `>= 1.9.0`; there is no `.terraform-version` file | Everything below |
+| azurerm provider | `~> 4.0` (`versions.tf` and the module). `.terraform.lock.hcl` is git-ignored, so every `terraform init` takes the newest 4.x — 4.81.0 at the time of writing | Installed by `terraform init`, not by hand |
+| random provider | `~> 3.6` (3.9.x resolves) | Generated Postgres password and JWT key; installed by `terraform init` |
+| Azure CLI (`az`) | Not pinned; any current 2.x | `az login` for local credentials, the bootstrap scripts, `az containerapp` commands (the extension installs itself on first use) |
+| Git | Any | Clone and branch |
+| Bash | Git Bash on Windows | Running `bootstrap/*.sh`. They set `MSYS_NO_PATHCONV` themselves, so Git Bash does not mangle `/subscriptions/...` arguments |
+| GitHub CLI (`gh`) | Optional; any | The bootstrap scripts use it, when signed in, to read repository ids and register the id-form OIDC subjects — without it they register only the name form. Also `gh workflow run` |
+| TFLint | Optional; CI installs the latest | Reproduces the pipeline's lint step |
+
+`jq` appears only in the apply workflow's output step, on the runner — you do
+not need it locally. On Windows, `winget install Hashicorp.Terraform`,
+`winget install Microsoft.AzureCLI` and `winget install GitHub.cli` cover the
+tools; check `terraform version` reports 1.15.8.
+
+**Access.** Tools are the easy half. To go further than `validate` you need:
+
+| Access | Why |
+|---|---|
+| A role on the FT-DEV subscription, in its Entra tenant | `az login` and `az account set` |
+| **Storage Blob Data Contributor** on `stftpaytfstate` (resource group `rg-ftpay-tfstate`) | `terraform init` and `plan` against the dev state. Shared-key access is disabled on the account, so a management role alone cannot read the blob, and a plan takes a lease on it (the state lock), which is a write. `bootstrap.sh` grants this only to whoever ran it and to the pipeline principal — everyone else is added by hand |
+| **Contributor** on `rg-ftpay-dev` | A plan refreshes resources whose keys are read back — the Managed Redis access key behind `redis-url`, for one — and Reader cannot list keys |
+| **Key Vault Secrets User** on the dev vault (`kv-ftpaydev<suffix>`) | The plan refreshes every `azurerm_key_vault_secret`. The vault uses RBAC authorisation, so no subscription or resource-group role reads secrets |
+| **Owner** on the subscription, and rights to create Entra app registrations | Only for the bootstrap scripts |
+| Write access to `FuturisticTechnologies/platform-infra` | Branches and pull requests. Environment secrets need repository admin |
+
+### Get the code
 
 ```bash
-# Once per subscription, by a human with Owner rights.
-./bootstrap/bootstrap.sh <subscription-id> FuturisticTechnologies/platform-infra
+git clone https://github.com/FuturisticTechnologies/platform-infra.git
+cd platform-infra
+git checkout dev
+```
 
+| Branch | What a push does |
+|---|---|
+| `dev` | Integration branch. Plans **and applies** the dev environment, with no approval gate |
+| `main` | Plans against dev; applies nothing. `dev` is merged into it |
+| `stage` | Nothing — no workflow triggers on it |
+
+Branch from `dev` (`infra/<topic>` is the convention), open a pull request into
+`dev` and read the plan the pipeline comments on it. Merging is the deployment.
+Once dev is healthy, `dev` is merged into `main`.
+
+### Authenticate
+
+```bash
+az login
+az account set --subscription <subscription-id>
+az account show --query "{name:name, id:id, tenant:tenantId}" -o table
+
+export TF_VAR_subscription_id=$(az account show --query id -o tsv)
+```
+
+In PowerShell the last line is
+`$env:TF_VAR_subscription_id = az account show --query id -o tsv`.
+
+Locally the provider and the backend both use that Azure CLI sign-in:
+`use_oidc` defaults to `false`, and `envs/backend-dev.hcl` sets
+`use_azuread_auth = true`, so the state blob is read with your Entra identity
+rather than an account key. CI signs in differently — `ARM_USE_OIDC`,
+`ARM_USE_AZUREAD`, `ARM_CLIENT_ID`, `ARM_TENANT_ID` and `ARM_SUBSCRIPTION_ID`
+from the `dev` environment secrets, plus `TF_VAR_use_oidc=true`. Leave all of
+those unset on a laptop: there is no GitHub token for OIDC to exchange.
+
+`subscription_id` has no default and is in no tfvars file; CI passes it as
+`TF_VAR_subscription_id`, and so should you (or `-var subscription_id=<id>`).
+It also seeds the six-character suffix in the registry, Key Vault and evidence
+storage account names (`locals.tf`), so it has to be the dev subscription's id.
+
+### Init, validate and plan
+
+Without Azure access — this is what the pipeline's `validate` job runs:
+
+```bash
+terraform fmt -check -recursive      # `terraform fmt -recursive` fixes what it reports
+terraform init -backend=false
+terraform validate
+tflint --init && tflint --recursive --minimum-failure-severity=error   # optional
+```
+
+Against the dev state:
+
+```bash
 terraform init -backend-config=envs/backend-dev.hcl
-terraform plan  -var-file=envs/dev.tfvars -var subscription_id=<id>
-terraform apply -var-file=envs/dev.tfvars -var subscription_id=<id>
+terraform plan -var-file=envs/dev.tfvars
 ```
 
-The first apply deploys a placeholder image to every app
-(`use_placeholder_images = true`), so it succeeds against an empty registry.
-Once the application pipelines have pushed real images, flip it to `false`.
+The state is `platform-dev.tfstate` in the `tfstate` container of
+`stftpaytfstate`. `envs/backend-staging.hcl` and `envs/backend-prod.hcl` point
+at the same account under their own keys; add `-reconfigure` to `init` when
+switching between them. Nothing plans staging or prod today.
 
-Then, per release:
+A plan takes the state lock — the same one the pipeline uses — and a plan from
+a laptop is never quite clean:
+
+- `azurerm_role_assignment.kv_deployer` and
+  `azurerm_role_assignment.evidence_deployer` are granted to whoever runs
+  Terraform (`data.azurerm_client_config.current`), so from your machine they
+  show as replacements pointing at your object id.
+- After 17:00 on a weekday the integration hub's `min_replicas` shows 0 → 1.
+  That is the nightly stop, not drift anyone introduced.
+
+Anything else in the plan is a real difference between the branch and dev.
+
+### How changes reach Azure
+
+| Event | What `terraform.yml` runs |
+|---|---|
+| Pull request into `dev` or `main` | validate → plan against dev, posted as a comment and uploaded as `tfplan-dev` |
+| Push to `dev` | validate → plan → **apply-dev** |
+| Push to `main` | validate → plan; nothing applies |
+| **Run workflow** | validate → plan → **apply-manual** for the chosen environment, from the branch picked in *Use workflow from* |
+
+The apply lives in `terraform-apply.yml`: it re-initialises, re-plans, runs
+`terraform apply -auto-approve -var-file=envs/<env>.tfvars` and writes the
+non-sensitive outputs to the run summary. Runs queue one at a time per
+environment (`concurrency: terraform-<env>`) and are never cancelled mid-apply.
+From a terminal: `gh workflow run terraform.yml --ref dev -f environment=dev`.
+Staging and prod fail the identity check, by design.
+
+`use_placeholder_images` defaults to `true` and `dev.tfvars` leaves it alone.
+It only decides the image a container app is *created* with — the image is in
+the module's `ignore_changes` — so it does nothing to apps that already exist.
+
+> **Do not run `terraform apply` from a laptop.** `bootstrap.sh` is the last
+> thing a human runs: "everything after this is done by the pipeline". A local
+> apply sits outside the pipeline's queue, applies a plan nobody saw on a pull
+> request, and re-grants the two deployer role assignments above to you —
+> taking Key Vault Secrets Officer away from the pipeline principal, which its
+> next run needs to refresh the vault's secrets. If the pipeline is broken,
+> fix the pipeline.
+
+### Day-to-day operations
+
+**Stopping and starting dev.** `start-or-stop.yml` (the *start or stop*
+workflow) stops dev at 17:00 London, Monday to Friday: Postgres is stopped and
+every container app is set to `min_replicas = 0`. To bring it back, Actions ▸
+**start or stop** ▸ Run workflow ▸ environment `dev`, action `start`, or:
 
 ```bash
-az containerapp job start -n caj-ftpay-dev-migrate -g rg-ftpay-dev   # migrate
-az containerapp update -n ca-ftpay-dev-payroll-api -g rg-ftpay-dev \
-  --image acrftpaydev…/payroll-backend:<sha>                        # deploy
+gh workflow run start-or-stop.yml -f environment=dev -f action=start
 ```
+
+`start` starts Postgres and puts the integration hub back to one replica. A
+`terraform apply` restores the replica counts too, but whether the Postgres
+server is running is not something this configuration sets, so only `start`
+brings the database back. More in [Nightly stop and start](#nightly-stop-and-start).
+
+**Reading outputs.** After `init` against the backend, `terraform output`
+lists the URLs, registry, Key Vault, egress IP and migration job. It only reads
+state.
+
+**Running the migration by hand.** The `national-insurance` deploy normally
+does it; outside a release:
+`az containerapp job start -n caj-ftpay-dev-migrate -g rg-ftpay-dev`.
+
+**A new subscription or environment.** From Git Bash, as subscription Owner:
+
+1. `./bootstrap/bootstrap.sh <subscription-id> FuturisticTechnologies/platform-infra`
+   registers the resource providers; creates `rg-ftpay-tfstate`,
+   `stftpaytfstate` and its `tfstate` container (versioning on, 30-day delete
+   retention, shared keys off); grants you Storage Blob Data Contributor on it;
+   creates the `ftpay-platform-infra` app registration with Owner on the
+   subscription and its federated credentials; and prints `AZURE_CLIENT_ID`,
+   `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID`. It reuses what already
+   exists. Set `STATE_SA` if the storage account name is taken, and change
+   `envs/backend-*.hcl` to match.
+2. Add those three as secrets on the GitHub environment of the same name
+   (Settings ▸ Environments ▸ `<env>` ▸ Environment secrets).
+3. `./bootstrap/app-deploy-identity.sh <subscription-id> <org/repo>...` for the
+   application repositories — see [Deploying the applications](#deploying-the-applications)
+   — and put the `deploy_principal_object_id` it prints into `envs/<env>.tfvars`.
+
+Both scripts register federated credentials for `environment:dev` only
+(`bootstrap.sh` adds the `main`, `development` and `pull_request` subjects), so
+a staging or prod environment needs `environment:<env>` added to their
+`SUBJECT_SUFFIXES` first. Run `gh auth login` beforehand so the id-form
+subjects are registered as well.
+
+### Troubleshooting
+
+- **`Error acquiring the state lock` / "state blob is already locked".** A
+  pipeline run or somebody's plan holds the lease; the Lock Info says which
+  operation and who. Wait for the run in Actions. Only when nothing is running
+  — a cancelled run can orphan a lease — use `terraform force-unlock <lock-id>`.
+- **403 / `AuthorizationPermissionMismatch` on `terraform init`.** No
+  data-plane role on `stftpaytfstate`. Shared keys are off, so Owner or
+  Contributor on the account is not enough; it takes Storage Blob Data
+  Contributor, and a new assignment can take a minute or two to apply.
+- **403 during the plan, on Key Vault secrets or listing keys.** Missing Key
+  Vault Secrets User on the vault, or Contributor on `rg-ftpay-dev` — see
+  **Access** above.
+- **The plan wants to create or replace the registry, Key Vault and storage
+  account.** Either `subscription_id` is not the dev subscription (it feeds the
+  name suffix), or `init` pointed at the wrong state key — re-run
+  `terraform init -reconfigure -backend-config=envs/backend-dev.hcl`.
+- **`MissingSubscription`, or `C:/Program Files/Git/subscriptions/...` in an
+  error.** Git Bash rewrote a `/subscriptions/...` argument. The bootstrap
+  scripts guard against it; for `az` commands typed by hand,
+  `export MSYS_NO_PATHCONV=1` first.
+- **`prefix must be 3-5 lowercase alphanumerics`.** Names are
+  `ca-<prefix>-<env>-<service>`, and Azure caps a container app name at 32
+  characters. Changing `prefix` at all also breaks `start-or-stop.yml` and the
+  application deploys, which hard-code `PREFIX: ftpay`.
 
 ## Decisions worth knowing
 
@@ -81,9 +272,9 @@ scaled-to-zero replica delivers nothing and nothing wakes it up.
 convention — as is production without database HA. Both fail at plan time.
 
 **Secrets are Key Vault references, versionless.** Rotating a secret does not
-need a deployment. HMRC's client id and secret are created as empty slots with
-`ignore_changes` on the value, so an operator setting the real credential is
-not reverted by the next apply.
+need a deployment. HMRC's client id and secret are created as placeholder
+slots (`set-out-of-band`) with `ignore_changes` on the value, so an operator
+setting the real credential is not reverted by the next apply.
 
 **Immutability is left Unlocked.** Locking the 7-year policy is irreversible —
 not undoable by Terraform, a support ticket, or Microsoft. It should be a
@@ -107,7 +298,7 @@ comparable — it does not need HA, it needs to behave like production.
 ## Pipeline
 
 `terraform.yml` runs fmt, validate and tflint, then plans and comments the plan
-on the pull request. Applying is either a push to `development`, or the manual
+on the pull request. Applying is either a push to `dev`, or the manual
 **Run workflow** button. Apply re-plans rather than replaying the artifact,
 because a run may have been sitting for hours.
 
@@ -165,7 +356,7 @@ by hand.
 
 | Repository | Deploys | Into |
 |---|---|---|
-| `national-insurance` | API image, Alembic migration, Angular bundle | `ca-…-payroll-api`, `caj-…-migrate`, the Static Web App |
+| `national-insurance` | API image, Alembic migration, front end image | `ca-…-payroll-api`, `caj-…-migrate`, `ca-…-frontend` |
 | `hmrc-rti-service` | .NET image | `ca-…-hmrc-rti` |
 | `integration-hub` | .NET image | `ca-…-integration-hub` |
 
@@ -173,7 +364,8 @@ The four snapshot repositories — `foundation-core`, `core-data-model`,
 `payroll-engine`, `paye-tax-engine` — deploy nowhere. They are cumulative
 milestone snapshots of the same codebase, and only the newest is live.
 
-Each deploy builds the image **in ACR** rather than on the runner, creates a
+Each deploy builds the image on the runner and pushes it to ACR — ACR Tasks
+(`az acr build`) is not permitted on this subscription — then creates a
 revision, waits for it to report Running and Healthy, and only then shifts
 traffic to it. Because the apps run in Multiple revision mode, a revision that
 never becomes healthy never receives traffic: the failure mode is "nothing
@@ -249,7 +441,8 @@ carries two entries — 16:00 and 17:00 UTC — and a guard step drops whichever
 one is not 17:00 in London today. One fires, one exits immediately.
 
 Two things to know. Scheduled workflows only run from the **default branch**,
-so this does nothing until it is merged. And Terraform still owns the replica
+so a change to the schedule does nothing until it is merged there. And
+Terraform still owns the replica
 counts: the next `terraform apply` after a shutdown will set the hub back to
 one replica, which is drift by design rather than a bug.
 
@@ -268,5 +461,7 @@ one replica, which is drift by design rather than a bug.
   the next step before anything faces the public internet for real.
 - **No alert rules.** App Insights collects; nothing pages anyone yet. That is
   PLAT-02, and it needs the team to agree what is worth waking up for.
-- **Front-end deployment is not wired.** The Static Web App exists; its
-  deployment token and build pipeline live with the Angular repo.
+- **No CDN in front of the Angular app.** It is served by nginx from
+  `ca-…-frontend` because Static Web Apps is not offered in a UK region, which
+  also costs the free certificates and per-pull-request previews — see
+  `apps.tf`.
