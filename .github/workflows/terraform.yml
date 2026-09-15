@@ -121,7 +121,11 @@ jobs:
 
       - name: Plan
         id: plan
+        # pipefail, or the step takes tee's exit status instead of terraform's:
+        # a plan that errored reported success, the check below passed it, and
+        # the pull request was told "No changes."
         run: |
+          set -euo pipefail
           terraform plan \
             -var-file=envs/${{ inputs.environment || 'dev' }}.tfvars \
             -out=tfplan-${{ inputs.environment || 'dev' }} \
