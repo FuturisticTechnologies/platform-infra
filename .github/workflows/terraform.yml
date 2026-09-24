@@ -63,6 +63,13 @@ jobs:
           terraform init -backend=false
           terraform validate
 
+      # tests/*.tftest.hcl, against mocked providers - no Azure sign-in and no
+      # state, so it belongs here rather than in the plan job. It is what
+      # proves each variable validation still rejects the value it was written
+      # for, and still accepts every environment's real settings.
+      - name: Test
+        run: terraform test
+
       - uses: terraform-linters/setup-tflint@v4
       - name: Lint
         run: |

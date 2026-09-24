@@ -54,9 +54,23 @@ resource "terraform_data" "hmrc_live_submission_guard" {
       condition     = !var.hmrc_allow_live_submission || local.is_production
       error_message = "hmrc_allow_live_submission may only be true in the prod environment (SOW gating rule 3)."
     }
+    # The flag and the URL have to agree. Live URL with the flag off means the
+    # RTI service refuses every submission to an endpoint that would have
+    # accepted them; flag on with the sandbox URL means production "files"
+    # returns HMRC never sees. Both look healthy until the first payroll run.
+    precondition {
+      condition     = var.hmrc_allow_live_submission == (var.hmrc_base_url == "https://api.service.hmrc.gov.uk")
+      error_message = "hmrc_base_url and hmrc_allow_live_submission disagree: the live HMRC URL goes with hmrc_allow_live_submission = true, and the sandbox URL with false."
+    }
     precondition {
       condition     = !local.is_production || var.postgres_ha_enabled
       error_message = "production requires postgres_ha_enabled = true to meet the 15 minute RPO."
+    }
+    # Burstable servers do not support zone-redundant HA, so a B_ SKU in
+    # production would fail at apply on the rule above - better said here.
+    precondition {
+      condition     = !local.is_production || !startswith(var.postgres_sku, "B_")
+      error_message = "production may not use a burstable (B_Standard_*) postgres_sku - burstable servers cannot run zone-redundant HA."
     }
     # Convenience in dev, never in production. The RTI service holds the HMRC
     # credentials and is the platform's only route to HMRC; a browsable Swagger
