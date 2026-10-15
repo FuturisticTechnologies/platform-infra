@@ -25,6 +25,11 @@ variable "image" {
 
 variable "target_port" {
   type = number
+
+  validation {
+    condition     = var.target_port >= 1 && var.target_port <= 65535 && floor(var.target_port) == var.target_port
+    error_message = "target_port must be a whole port number from 1 to 65535."
+  }
 }
 
 variable "external_ingress" {
@@ -36,12 +41,24 @@ variable "external_ingress" {
 variable "health_path" {
   type    = string
   default = "/api/v1/health"
+
+  # A probe path without the leading slash is accepted by the API and then
+  # fails every probe, so the app never becomes ready.
+  validation {
+    condition     = startswith(var.health_path, "/")
+    error_message = "health_path must start with /."
+  }
 }
 
 variable "ready_path" {
   description = "Readiness path. Defaults to health_path when the service has no separate probe."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.ready_path == null ? true : startswith(var.ready_path, "/")
+    error_message = "ready_path must be null or start with /."
+  }
 }
 
 variable "cpu" {
@@ -57,6 +74,11 @@ variable "memory" {
 variable "min_replicas" {
   type    = number
   default = 0
+
+  validation {
+    condition     = var.min_replicas >= 0 && floor(var.min_replicas) == var.min_replicas
+    error_message = "min_replicas must be a whole number, 0 or more."
+  }
 }
 
 variable "max_replicas" {

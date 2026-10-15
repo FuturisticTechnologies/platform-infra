@@ -127,6 +127,7 @@ Without Azure access — this is what the pipeline's `validate` job runs:
 terraform fmt -check -recursive      # `terraform fmt -recursive` fixes what it reports
 terraform init -backend=false
 terraform validate
+terraform test                       # input validation tests, providers mocked
 tflint --init && tflint --recursive --minimum-failure-severity=error   # optional
 ```
 
@@ -305,10 +306,10 @@ comparable — it does not need HA, it needs to behave like production.
 
 ## Pipeline
 
-`terraform.yml` runs fmt, validate and tflint, then plans and comments the plan
-on the pull request. Applying is either a push to `dev`, or the manual
-**Run workflow** button. Apply re-plans rather than replaying the artifact,
-because a run may have been sitting for hours.
+`terraform.yml` runs fmt, validate, the offline tests and tflint, then plans and
+comments the plan on the pull request. Applying is either a push to `dev`, or the
+manual **Run workflow** button. Apply re-plans rather than replaying the
+artifact, because a run may have been sitting for hours.
 
 **The environment is a dropdown**, not a hardcoded value. One choice drives the
 Azure identity, the state file, the tfvars and the sizing:
