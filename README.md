@@ -162,13 +162,15 @@ Anything else in the plan is a real difference between the branch and dev.
 | Pull request into `dev` or `main` | validate → plan against dev, posted as a comment and uploaded as `tfplan-dev` |
 | Push to `dev` | validate → plan → **apply-dev** |
 | Push to `main` | validate → plan; nothing applies |
-| **Run workflow** | validate → plan → **apply-manual** for the chosen environment, from the branch picked in *Use workflow from* |
+| **Run workflow** | validate → plan for the chosen environment, from the branch picked in *Use workflow from*. Plan only, unless **Apply after planning** is ticked, which adds → **apply-manual** |
 
 The apply lives in `terraform-apply.yml`: it re-initialises, re-plans, runs
 `terraform apply -auto-approve -var-file=envs/<env>.tfvars` and writes the
 non-sensitive outputs to the run summary. Runs queue one at a time per
 environment (`concurrency: terraform-<env>`) and are never cancelled mid-apply.
-From a terminal: `gh workflow run terraform.yml --ref dev -f environment=dev`.
+From a terminal: `gh workflow run terraform.yml --ref dev -f environment=dev`
+plans dev; add `-f apply=true` to apply it as well. The plan's one-line summary
+is on the run page either way.
 Staging and prod fail the identity check, by design.
 
 `use_placeholder_images` defaults to `true` and `dev.tfvars` leaves it alone.
@@ -308,7 +310,9 @@ comparable — it does not need HA, it needs to behave like production.
 
 `terraform.yml` runs fmt, validate, the offline tests and tflint, then plans and
 comments the plan on the pull request. Applying is either a push to `dev`, or the
-manual **Run workflow** button. Apply re-plans rather than replaying the
+manual **Run workflow** button with **Apply after planning** ticked - left
+unticked, a manual run is a plan you can read without changing anything. Apply
+re-plans rather than replaying the
 artifact, because a run may have been sitting for hours.
 
 **The environment is a dropdown**, not a hardcoded value. One choice drives the
