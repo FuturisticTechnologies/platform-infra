@@ -6,6 +6,11 @@ name: infrastructure
 #
 # Only dev is set up today. Picking staging or prod fails on the identity
 # check, by design: it is a missing environment secret, not a broken pipeline.
+#
+# A manual run only plans unless "Apply after planning" is ticked. It used to
+# apply unconditionally, so there was no way to see what a branch would do to
+# an environment without also doing it - which matters most for the
+# environments with no approval gate in front of them, i.e. all of them.
 
 on:
   pull_request:
@@ -20,6 +25,11 @@ on:
         default: dev
         type: choice
         options: [dev, staging, prod]
+      apply:
+        description: Apply after planning (unticked = plan only)
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -149,6 +159,20 @@ jobs:
             exit 1
           fi
 
+      # A pull request gets the plan as a comment; a push or a manual run has
+      # nowhere to put it but the run page, and a plan-only run is pointless
+      # if its answer is buried in the log.
+      - name: Summarise the plan
+        if: github.event_name != 'pull_request'
+        env:
+          ENV_NAME: ${{ inputs.environment || 'dev' }}
+        run: |
+          {
+            echo "### Terraform plan - \`$ENV_NAME\`"
+            echo
+            echo "**$(grep -m1 '^Plan: ' plan.txt || echo 'No changes.')**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Comment plan on the pull request
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -202,9 +226,11 @@ jobs:
   # for the lock - plan took it, apply failed acquiring it, every dispatch.
   # This also means a plan that cannot even authenticate skips the apply
   # instead of failing it a second time for a different reason.
+  #
+  # Only when asked: an unticked "Apply after planning" stops at the plan.
   apply-manual:
     needs: plan
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.apply
     uses: ./.github/workflows/terraform-apply.yml
     with:
       environment: ${{ inputs.environment }}
